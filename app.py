@@ -23,7 +23,7 @@ APIFY_API_KEY   = os.getenv("APIFY_API_KEY", "")
 NOTION_API_KEY  = os.getenv("NOTION_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 NOTION_VERSION  = "2022-06-28"
-BATCH_SIZE      = 80
+BATCH_SIZE      = 40
 
 MOTIVATION_TAGS = [
     "Praise", "Criticism", "Question", "Suggestion", "Comparison",
@@ -371,7 +371,7 @@ Required format: [{{"id": "page-id-here", "motivation_tag": "Praise", "subject_t
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=4000,
+        max_tokens=8000,
         messages=[{"role": "user", "content": prompt}],
     )
     raw = response.content[0].text.strip()
@@ -530,31 +530,42 @@ def run_pipeline(run_id, form_data):
                 if not comments:
                     continue
 
+                # Get tags — retry in two halves if JSON is truncated
+                tag_map = {}
                 try:
-                    results  = tag_batch(comments, subject_tags)
-                    tag_map  = {t["id"]: t for t in results}
-
-                    for comment in comments:
-                        tag = tag_map.get(comment["id"])
-                        if not tag:
-                            continue
-                        is_untaggable = tag.get("motivation_tag") == "Untaggable"
-                        ok = update_row_tags(
-                            comment["id"],
-                            tag.get("motivation_tag", ""),
-                            tag.get("subject_tag", ""),
-                            untaggable=is_untaggable,
-                        )
-                        if ok:
-                            tagged += 1
-                        time.sleep(0.34)
-
-                    update_run(run_id, items_tagged=tagged)
-                    log(run_id, f"Tagged {tagged} / {len(rows)} rows")
-                    time.sleep(1)
-
+                    results = tag_batch(comments, subject_tags)
+                    tag_map = {t["id"]: t for t in results}
+                except json.JSONDecodeError:
+                    log(run_id, f"Batch {i // BATCH_SIZE + 1} truncated — retrying in two halves")
+                    mid = len(comments) // 2
+                    for half in [comments[:mid], comments[mid:]]:
+                        try:
+                            tag_map.update({t["id"]: t for t in tag_batch(half, subject_tags)})
+                        except Exception as e:
+                            log(run_id, f"Half-batch failed: {e}")
                 except Exception as e:
-                    log(run_id, f"Tagging batch {i // BATCH_SIZE + 1} failed: {e}")
+                    log(run_id, f"Batch {i // BATCH_SIZE + 1} failed: {e}")
+                    continue
+
+                # Write tags to Notion
+                for comment in comments:
+                    tag = tag_map.get(comment["id"])
+                    if not tag:
+                        continue
+                    is_untaggable = tag.get("motivation_tag") == "Untaggable"
+                    ok = update_row_tags(
+                        comment["id"],
+                        tag.get("motivation_tag", ""),
+                        tag.get("subject_tag", ""),
+                        untaggable=is_untaggable,
+                    )
+                    if ok:
+                        tagged += 1
+                    time.sleep(0.34)
+
+                update_run(run_id, items_tagged=tagged)
+                log(run_id, f"Tagged {tagged} / {len(rows)} rows")
+                time.sleep(1)
 
             log(run_id, f"Tagging complete — {tagged} rows tagged")
 
