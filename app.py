@@ -91,6 +91,7 @@ def safe_int(value):
 # ──────────────────────────────────────────────────────────────
 
 def create_apify_run(actor_id, actor_input, run_id):
+    actor_id = actor_id.replace("/", "~")  # Apify REST API requires ~ not /
     r = requests.post(
         f"https://api.apify.com/v2/acts/{actor_id}/runs",
         params={"token": APIFY_API_KEY},
@@ -192,7 +193,7 @@ def build_actor_config(platform, form_data, tier):
         }
 
     elif platform == "trustpilot":
-        return "appointed/trustpilot-scraper", {
+        return "casper11515/trustpilot-reviews-scraper", {
             "startUrls": [{"url": form_data.get("trustpilot_url", "")}],
             "maxReviews": max_items,
         }
