@@ -422,36 +422,21 @@ def run_pipeline(run_id, form_data):
         # ── Per-platform scrape ──
         for platform in platforms:
 
-            # ── YouTube: two-phase (discover videos → scrape comments) ──
+        # ── YouTube: use video URLs directly ──
             if platform == "youtube":
                 label = "YouTube"
-                update_run(run_id, phase="Discovering YouTube videos")
-
-                disc_actor, disc_input = build_actor_config("youtube_discover", form_data, tier)
-                try:
-                    disc_run_id, disc_dataset_id = create_apify_run(disc_actor, disc_input, run_id)
-                except Exception as e:
-                    log(run_id, f"Failed to start YouTube discovery run: {e}")
-                    continue
-
-                success = wait_for_apify_run(disc_run_id, run_id)
-                if not success:
-                    log(run_id, "YouTube discovery run failed — skipping")
-                    continue
-
-                disc_items = fetch_apify_dataset(disc_dataset_id, run_id)
+                raw_urls = form_data.get("youtube_video_urls", "")
                 video_urls = [
-                    {"url": item.get("url") or item.get("videoUrl") or item.get("id")}
-                    for item in disc_items
-                    if (item.get("url") or item.get("videoUrl") or item.get("id"))
-                    and "watch?v=" in (item.get("url") or item.get("videoUrl") or item.get("id") or "")
-                ][:20]
+                    {"url": u.strip()}
+                    for u in raw_urls.replace("\n", ",").split(",")
+                    if u.strip() and "watch?v=" in u
+                ]
 
                 if not video_urls:
-                    log(run_id, "No video URLs found from discovery — skipping YouTube")
+                    log(run_id, "No valid YouTube video URLs provided — skipping")
                     continue
 
-                log(run_id, f"Found {len(video_urls)} video URLs — starting comment scrape")
+                log(run_id, f"Scraping comments from {len(video_urls)} YouTube videos")
                 update_run(run_id, phase="Scraping YouTube comments")
 
                 max_items = 2000 if tier == "deep" else 500
