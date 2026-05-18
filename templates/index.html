@@ -533,8 +533,8 @@
             <span class="platform-name">YouTube</span>
           </label>
           <div class="platform-fields" id="fields-youtube">
-            <input type="url" id="youtube_url" placeholder="https://www.youtube.com/@channelname">
-            <p class="field-hint">Channel URL — the tool will select the most recent popular videos</p>
+            <textarea id="youtube_video_urls" rows="4" placeholder="https://www.youtube.com/watch?v=abc123&#10;https://www.youtube.com/watch?v=def456&#10;Paste one video URL per line — 10 to 20 recent videos recommended"></textarea>
+            <p class="field-hint">Paste recent video URLs from the channel, one per line. Find them by going to the channel → Videos → sorted by newest.</p>
           </div>
         </div>
 
@@ -593,8 +593,8 @@
             <span class="platform-name">Trustpilot</span>
           </label>
           <div class="platform-fields" id="fields-trustpilot">
-            <input type="url" id="trustpilot_url" placeholder="https://www.trustpilot.com/review/thebodycoach.com">
-            <p class="field-hint">Full Trustpilot review page URL</p>
+            <input type="text" id="trustpilot_url" placeholder="e.g. seedtostage.com">
+            <p class="field-hint">Just the domain — not the full Trustpilot URL</p>
           </div>
         </div>
 
@@ -696,7 +696,7 @@
       tier,
       platforms,
       subject_tags:   subjectTags,
-      youtube_url:    document.getElementById('youtube_url')?.value.trim()    || '',
+      youtube_video_urls: document.getElementById('youtube_video_urls')?.value.trim() || '',
       tiktok_handle:  document.getElementById('tiktok_handle')?.value.trim()  || '',
       reddit_term:    document.getElementById('reddit_term')?.value.trim()    || '',
       appstore_id:    document.getElementById('appstore_id')?.value.trim()    || '',
