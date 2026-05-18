@@ -128,7 +128,7 @@ def fetch_apify_dataset(dataset_id, run_id):
     while True:
         r = requests.get(
             f"https://api.apify.com/v2/datasets/{dataset_id}/items",
-            params={"token": APIFY_API_KEY, "offset": offset, "limit": limit, "clean": True},
+            params={"token": APIFY_API_KEY, "offset": offset, "limit": limit},
             timeout=30,
         )
         r.raise_for_status()
