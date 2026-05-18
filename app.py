@@ -156,10 +156,19 @@ def build_actor_config(platform, form_data, tier):
     max_items = 2000 if tier == "deep" else 500
 
     if platform == "youtube":
-        return "streamers/youtube-comments-scraper", {
-            "startUrls": [{"url": form_data.get("youtube_url", "")}],
-            "maxComments": max_items,
+        return "streamers~youtube-comments-scraper", {
+            "startUrls": form_data.get("youtube_video_urls", []),
+            "maxComments": max_items // 20,  # split across videos
             "sortCommentsBy": "NEWEST_FIRST",
+        }
+
+    elif platform == "youtube_discover":
+        # Phase 1: discover video URLs from channel
+        posts = 20 if tier == "deep" else 10
+        return "streamers~youtube-scraper", {
+            "startUrls": [{"url": form_data.get("youtube_url", "")}],
+            "maxResults": posts,
+            "sortVideosBy": "NEWEST",
         }
 
     elif platform == "tiktok":
@@ -193,9 +202,10 @@ def build_actor_config(platform, form_data, tier):
         }
 
     elif platform == "trustpilot":
-        return "casper11515/trustpilot-reviews-scraper", {
-            "startUrls": [{"url": form_data.get("trustpilot_url", "")}],
-            "maxReviews": max_items,
+        return "automation-lab~trustpilot", {
+            "companyUrls": [form_data.get("trustpilot_url", "")],
+            "maxReviewsPerCompany": max_items,
+            "sort": "recency",
         }
 
     return None, None
@@ -411,6 +421,76 @@ def run_pipeline(run_id, form_data):
 
         # ── Per-platform scrape ──
         for platform in platforms:
+
+            # ── YouTube: two-phase (discover videos → scrape comments) ──
+            if platform == "youtube":
+                label = "YouTube"
+                update_run(run_id, phase="Discovering YouTube videos")
+
+                disc_actor, disc_input = build_actor_config("youtube_discover", form_data, tier)
+                try:
+                    disc_run_id, disc_dataset_id = create_apify_run(disc_actor, disc_input, run_id)
+                except Exception as e:
+                    log(run_id, f"Failed to start YouTube discovery run: {e}")
+                    continue
+
+                success = wait_for_apify_run(disc_run_id, run_id)
+                if not success:
+                    log(run_id, "YouTube discovery run failed — skipping")
+                    continue
+
+                disc_items = fetch_apify_dataset(disc_dataset_id, run_id)
+                video_urls = [
+                    {"url": item.get("url") or item.get("videoUrl") or item.get("id")}
+                    for item in disc_items
+                    if (item.get("url") or item.get("videoUrl") or item.get("id"))
+                    and "watch?v=" in (item.get("url") or item.get("videoUrl") or item.get("id") or "")
+                ][:20]
+
+                if not video_urls:
+                    log(run_id, "No video URLs found from discovery — skipping YouTube")
+                    continue
+
+                log(run_id, f"Found {len(video_urls)} video URLs — starting comment scrape")
+                update_run(run_id, phase="Scraping YouTube comments")
+
+                max_items = 2000 if tier == "deep" else 500
+                comment_input = {
+                    "startUrls": video_urls,
+                    "maxComments": max(10, max_items // len(video_urls)),
+                    "sortCommentsBy": "NEWEST_FIRST",
+                }
+
+                try:
+                    apify_run_id, dataset_id = create_apify_run(
+                        "streamers~youtube-comments-scraper", comment_input, run_id
+                    )
+                except Exception as e:
+                    log(run_id, f"Failed to start YouTube comments run: {e}")
+                    continue
+
+                success = wait_for_apify_run(apify_run_id, run_id)
+                if not success:
+                    log(run_id, "YouTube comments run failed — skipping")
+                    continue
+
+                update_run(run_id, phase="Retrieving YouTube comments")
+                items = fetch_apify_dataset(dataset_id, run_id)
+                top_level = [i for i in items if is_top_level(i)]
+                log(run_id, f"YouTube: {len(items)} items, {len(top_level)} top-level")
+
+                update_run(run_id, phase="Writing YouTube comments to Notion")
+                written = 0
+                for item in top_level:
+                    ok, _ = write_comment_row(db_id, item, label)
+                    if ok:
+                        written += 1
+                    update_run(run_id, items_written=total_written + written)
+                    time.sleep(0.34)
+
+                total_written += written
+                log(run_id, f"YouTube: {written} rows written")
+                continue
             actor_id, actor_input = build_actor_config(platform, form_data, tier)
             if not actor_id:
                 log(run_id, f"No actor configured for: {platform}")
