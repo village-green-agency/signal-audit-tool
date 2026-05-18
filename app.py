@@ -95,7 +95,7 @@ def create_apify_run(actor_id, actor_input, run_id):
     r = requests.post(
         f"https://api.apify.com/v2/acts/{actor_id}/runs",
         params={"token": APIFY_API_KEY},
-        json={"input": actor_input},
+        json=actor_input,
         timeout=30,
     )
     r.raise_for_status()
