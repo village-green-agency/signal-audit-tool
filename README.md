@@ -1,99 +1,144 @@
 # Village Hall — Signal Audit Tool
 
-Runs the full data pipeline for a signal audit: Apify scrape → Notion write → Claude API tagging. Leaves Claude Chat free for analysis only.
+Runs the full data pipeline for a signal audit: scrape → Notion write → tag (per platform) → author aggregation. Leaves Claude Chat free for analysis only.
 
 ---
 
-## Option A — Run locally (Python required)
+## Environment variables
 
-### 1. Install Python dependencies
+Set these in Railway (Settings → Variables) or in a local `.env` file:
+
+| Variable | Where to find it |
+|---|---|
+| `APIFY_API_KEY` | apify.com → Settings → Integrations → API token |
+| `NOTION_API_KEY` | notion.so/my-integrations → Village Hall Tool → Internal Integration Secret |
+| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys |
+| `YOUTUBE_API_KEY` | Google Cloud Console → APIs & Services → YouTube Data API v3 |
+
+---
+
+## Option A — Run locally
+
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Set up your API keys
-```bash
-cp .env.example .env
-```
-Open `.env` and fill in:
-- `APIFY_API_KEY` — Apify dashboard → Settings → Integrations → API token
-- `NOTION_API_KEY` — notion.so/my-integrations → your integration → Internal Integration Secret
-- `ANTHROPIC_API_KEY` — console.anthropic.com → API Keys
-
-### 3. Start the tool
-```bash
+cp .env.example .env   # fill in your four API keys
 python app.py
 ```
 
-### 4. Open in your browser
-```
-http://localhost:5000
-```
-
-That's it. Keep the terminal window open while a run is in progress.
+Open `http://localhost:5000`. Keep the terminal open during a run.
 
 ---
 
-## Option B — Deploy to Railway (no terminal needed after setup)
+## Option B — Deploy to Railway
 
-Railway hosts the app in the cloud. The form works from any browser, on any device.
+1. Push this folder to a GitHub repository
+2. Railway: New Project → Deploy from GitHub → select repo
+3. Set the four environment variables in Railway → Settings → Variables
+4. Railway gives you a public URL — bookmark it
 
-### 1. Create a Railway account
-Go to railway.app and sign up (free tier available).
+Deployment is automatic on every GitHub push.
 
-### 2. Deploy from GitHub
-- Push this folder to a GitHub repository
-- In Railway: New Project → Deploy from GitHub repo → select your repo
-- Railway detects the Procfile and deploys automatically
+---
 
-### 3. Set environment variables in Railway
-In your Railway project: Settings → Variables → add:
-- `APIFY_API_KEY`
-- `NOTION_API_KEY`
-- `ANTHROPIC_API_KEY`
+## What the tool creates in Notion
 
-### 4. Open your Railway URL
-Railway gives you a public URL (e.g. `your-app.railway.app`). Bookmark it.
+Three databases are created as children of the brand page on every run:
+
+**Comment Dataset** — one row per top-level comment across all platforms. Fields:
+- Comment, Platform, Source URL, Item URL, Published Date, Author
+- Reply Count, Like Count, Has Replies (boolean)
+- Motivation Tag, Sentiment Tag, Subject Tag (multi-select, up to 2)
+- Untaggable (checkbox), Note
+
+**Reddit Threads** — one row per Reddit post/thread (created only if Reddit is selected). Fields:
+- Title, Subreddit, URL, Upvote Count, Comment Count, Date, Body, Search Term
+
+**Authors** — one row per unique author/platform combination, sorted by comment count. Fields:
+- Author, Platform, Comment Count, Like Count Total
+
+A search volume callout block is also appended to the brand page (Standard and Deep tiers).
+
+---
+
+## Tag system
+
+**Motivation tag** (single, primary motivation):
+- Praise — positive judgment
+- Criticism — negative judgment
+- Question — seeking information
+- Suggestion — directive or prescriptive
+- Feedback — reporting personal experience
+- Comparison — placing brand alongside another
+- Self-expression — using brand to say something about identity
+
+**Sentiment tag** (single):
+- Positive, Negative, Neutral, Mixed
+
+**Subject tags** (multi-select, 1–2 per comment):
+- Confirmed in Claude Chat during Phase 0, before running
+
+---
+
+## Pipeline flow
+
+Tagging runs immediately after each platform completes — not at the end. A failure in one platform's tagging does not affect others.
+
+```
+For each platform:
+  → Scrape (Apify or YouTube API)
+  → Write rows to Comment Dataset
+  → Tag untagged rows via Claude API (Haiku)
+
+Reddit additionally:
+  → Posts → Reddit Threads database
+  → Comments → Comment Dataset (same as other platforms)
+
+After all platforms:
+  → Google search volume (Standard/Deep only)
+  → Build Authors database from full comment dataset
+```
 
 ---
 
 ## How to use
 
-### Before opening the tool
-Run this in Claude Chat first (inside the Village Hall project):
-1. Brand verification — confirm the right brand
-2. Subject tag confirmation — locked before any scraping begins
-3. Platform Routing — Claude produces a Platform Routing Output block
-
-Copy the Platform Routing Output block. You'll paste parts of it into the form.
+### Before opening the tool (in Claude Chat)
+1. Brand verification
+2. Subject tag confirmation — Phase 0
+3. Platform routing — Claude produces a Platform Routing Output block
 
 ### In the tool
-1. Enter the brand name and Notion brand page ID
-2. Select the run tier (Standard for most pitches)
-3. Tick the platforms confirmed by Claude Chat and fill in their URLs/IDs
-4. Paste the confirmed subject tags
-5. Click Run — the form submits and the status panel appears
-6. Walk away. You'll see live progress in the status panel.
+1. Enter brand name and Notion brand page ID
+2. Select run tier
+3. Tick confirmed platforms and fill in their URLs/IDs
+4. Paste confirmed subject tags
+5. Click Run — status panel shows live progress
 
 ### After the run
-The status panel shows a link to the Comment Dataset database in Notion when complete. Open a fresh Claude Chat session and ask it to run the thematic analysis and produce the Signal Audit report.
+Open a fresh Claude Chat session. Ask it to read the Comment Dataset and Reddit Threads databases from Notion and run the signal audit analysis (Phases 4–7).
 
 ---
 
-## What the tool does not do
+## Platform notes
 
-- It does not run the analysis — that stays in Claude Chat intentionally
-- It does not create the brand page in Notion — do this quickly in Claude Chat for new brands
-- It does not confirm subject tags — these must be locked in Claude Chat before running
-- It does not scrape specialist forums — forum URLs flagged in Platform Routing are noted for Claude Chat manual research (automation coming later)
+| Platform | Input | Notes |
+|---|---|---|
+| YouTube | Channel URL or @handle | Resolved to uploads playlist automatically. Up to 20 recent videos. |
+| TikTok | @handle | Most popular posts |
+| Reddit | Search term | Posts → Reddit Threads DB. Comments → Comment Dataset. Only run if Reddit presence confirmed in Claude Chat. |
+| Substack | Publication URL | Input schema may need adjustment on first live test |
+| App Store | App ID or bundle ID | |
+| Play Store | Package name | |
+| Trustpilot | Full review page URL | Domain parsed automatically |
+| Forum | Thread URLs, one per line | Claude Haiku extracts individual comments from each crawled page |
+
+Instagram: not supported — platform blocks scraping.
 
 ---
 
-## Notes
+## Timing
 
-- Notion rate limit: 3 requests/second — built into the tool, do not modify
-- Standard tier: typically 15–25 minutes end to end
-- Deep tier: typically 45–90 minutes end to end
-- If a platform scrape fails, the tool logs the error and continues with remaining platforms
-- Tagging is resumable — if interrupted, restart the tool and re-submit the same run; the tagger only touches untagged rows
-- Run history is in-memory only — it resets when the tool restarts
+- Standard tier: 15–30 minutes
+- Deep tier: 45–90 minutes
+
+If a platform scrape fails, the tool logs the error and continues. Tagging is resumable — resubmitting the same run only tags untagged rows.
