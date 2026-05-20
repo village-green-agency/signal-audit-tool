@@ -1,6 +1,19 @@
 """
 app.py — The Village Hall Signal Audit Tool
-Runs the full pipeline: Apify scrape → Notion write → Claude tagging
+Runs the full pipeline: scrape → Notion write → Claude tagging
+
+Platforms:
+  YouTube    — official YouTube Data API v3 (not Apify)
+  TikTok     — Apify clockworks/tiktok-comments-scraper
+  Reddit     — Apify trudax/reddit-scraper-lite
+  App Store  — Apify canadesk/app-store-scraper
+  Play Store — Apify canadesk/google-play-scraper
+  Trustpilot — Apify automation-lab/trustpilot
+  Substack   — Apify epctex/substack-scraper
+  Forum      — Apify apify/website-content-crawler + Claude Haiku extraction
+
+Additional:
+  Google search volume — DataForSEO API (Standard/Deep only)
 """
 
 import os
@@ -19,11 +32,15 @@ load_dotenv()
 
 app = Flask(__name__, template_folder="templates")
 
-APIFY_API_KEY   = os.getenv("APIFY_API_KEY", "")
-NOTION_API_KEY  = os.getenv("NOTION_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-NOTION_VERSION  = "2022-06-28"
-BATCH_SIZE      = 40
+APIFY_API_KEY       = os.getenv("APIFY_API_KEY", "")
+NOTION_API_KEY      = os.getenv("NOTION_API_KEY", "")
+ANTHROPIC_API_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
+YOUTUBE_API_KEY     = os.getenv("YOUTUBE_API_KEY", "")
+
+
+NOTION_VERSION   = "2022-06-28"
+BATCH_SIZE       = 40
+YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"   # 40 comments per tagging batch; 8000 max_tokens avoids truncation
 
 MOTIVATION_TAGS = [
     "Praise", "Criticism", "Question", "Suggestion", "Comparison",
@@ -50,6 +67,8 @@ PLATFORM_LABELS = {
     "appstore":   "App Store",
     "playstore":  "Play Store",
     "trustpilot": "Trustpilot",
+    "substack":   "Substack",
+    "forum":      "Forum",
 }
 
 runs = {}  # In-memory run state
@@ -86,16 +105,173 @@ def safe_int(value):
         return None
 
 
+def parse_trustpilot_domain(url_or_domain):
+    """Extract bare domain from a Trustpilot review URL, or return as-is."""
+    s = url_or_domain.strip()
+    if "trustpilot.com/review/" in s:
+        return s.split("trustpilot.com/review/")[-1].strip("/")
+    return s
+
+def parse_forum_urls(raw):
+    """Parse newline-separated forum URLs from form input."""
+    if isinstance(raw, list):
+        return [u.strip() for u in raw if u.strip()]
+    return [u.strip() for u in raw.split("\n") if u.strip()]
+
+
+
+def parse_youtube_handle(channel_input):
+    """Extract handle or channel ID from a YouTube URL or raw @handle/ID."""
+    s = channel_input.strip()
+    if "/@" in s:
+        return s.split("/@")[1].split("/")[0].split("?")[0]
+    if "/channel/" in s:
+        return s.split("/channel/")[1].split("/")[0].split("?")[0]
+    if "/c/" in s:
+        return s.split("/c/")[1].split("/")[0].split("?")[0]
+    if "/user/" in s:
+        return s.split("/user/")[1].split("/")[0].split("?")[0]
+    return s.lstrip("@")
+
+
+# ──────────────────────────────────────────────────────────────
+# YouTube Data API v3
+# ──────────────────────────────────────────────────────────────
+
+def fetch_youtube_comments(channel_input, max_items, run_id):
+    """
+    Collect top-level comments from a YouTube channel via the official Data API v3.
+    Flow: resolve handle → uploads playlist → video IDs → commentThreads
+    Returns items in write_comment_row-compatible format.
+
+    Quota cost: ~1–2 units for channel resolution, ~1 unit per 50 playlist items,
+    ~1 unit per 100 comments. A Standard run (~500 comments) costs roughly 50–80 units
+    against a 10,000/day free quota.
+    """
+    if not YOUTUBE_API_KEY:
+        log(run_id, "YouTube: YOUTUBE_API_KEY not configured — skipping")
+        return []
+
+    handle = parse_youtube_handle(channel_input)
+
+    # ── 1. Resolve to channel ID + uploads playlist ID ──
+    try:
+        if handle.startswith("UC") and len(handle) == 24:
+            params = {"key": YOUTUBE_API_KEY, "id": handle, "part": "contentDetails"}
+        else:
+            params = {"key": YOUTUBE_API_KEY, "forHandle": handle, "part": "contentDetails"}
+
+        r = requests.get(f"{YOUTUBE_API_BASE}/channels", params=params, timeout=15)
+        r.raise_for_status()
+        items = r.json().get("items", [])
+        if not items:
+            log(run_id, f"YouTube: channel not found for '{handle}'")
+            return []
+        uploads_playlist_id = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        log(run_id, f"YouTube: resolved channel → uploads playlist {uploads_playlist_id}")
+    except Exception as e:
+        log(run_id, f"YouTube: channel resolution failed — {e}")
+        return []
+
+    # ── 2. Get recent video IDs from uploads playlist ──
+    # Uses playlistItems.list (1 unit/page) — never search.list (100 units/call)
+    video_ids = []
+    next_page = None
+    target_videos = 20
+
+    while len(video_ids) < target_videos:
+        params = {
+            "key": YOUTUBE_API_KEY,
+            "playlistId": uploads_playlist_id,
+            "part": "contentDetails",
+            "maxResults": 50,
+        }
+        if next_page:
+            params["pageToken"] = next_page
+        try:
+            r = requests.get(f"{YOUTUBE_API_BASE}/playlistItems", params=params, timeout=15)
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            log(run_id, f"YouTube: playlist fetch failed — {e}")
+            break
+
+        for item in data.get("items", []):
+            video_ids.append(item["contentDetails"]["videoId"])
+        next_page = data.get("nextPageToken")
+        if not next_page:
+            break
+
+    video_ids = video_ids[:target_videos]
+    log(run_id, f"YouTube: {len(video_ids)} videos to collect comments from")
+
+    # ── 3. Fetch comment threads per video ──
+    all_comments = []
+    per_video_target = max(max_items // max(len(video_ids), 1), 25)
+
+    for video_id in video_ids:
+        if len(all_comments) >= max_items:
+            break
+
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        next_page = None
+        vid_count = 0
+
+        while vid_count < per_video_target:
+            params = {
+                "key": YOUTUBE_API_KEY,
+                "videoId": video_id,
+                "part": "snippet",
+                "maxResults": 100,
+                "order": "relevance",
+            }
+            if next_page:
+                params["pageToken"] = next_page
+
+            try:
+                r = requests.get(f"{YOUTUBE_API_BASE}/commentThreads", params=params, timeout=15)
+                if r.status_code == 403:
+                    break  # Comments disabled on this video — skip silently
+                r.raise_for_status()
+                data = r.json()
+            except Exception as e:
+                log(run_id, f"YouTube: comment fetch failed for {video_id} — {e}")
+                break
+
+            for item in data.get("items", []):
+                tl = item["snippet"]["topLevelComment"]["snippet"]
+                comment_id = item["id"]
+                all_comments.append({
+                    "comment":     tl.get("textOriginal") or tl.get("textDisplay", ""),
+                    "author":      tl.get("authorDisplayName", ""),
+                    "publishedAt": tl.get("publishedAt", ""),
+                    "likeCount":   tl.get("likeCount", 0),
+                    "replyCount":  item["snippet"].get("totalReplyCount", 0),
+                    "videoUrl":    video_url,
+                    "commentUrl":  f"{video_url}&lc={comment_id}",
+                    "videoTitle":  "",
+                })
+                vid_count += 1
+
+            next_page = data.get("nextPageToken")
+            if not next_page:
+                break
+
+        time.sleep(0.1)
+
+    log(run_id, f"YouTube API: {len(all_comments)} comments collected")
+    return all_comments[:max_items]
+
+
 # ──────────────────────────────────────────────────────────────
 # Apify
 # ──────────────────────────────────────────────────────────────
 
 def create_apify_run(actor_id, actor_input, run_id):
-    actor_id = actor_id.replace("/", "~")  # Apify REST API requires ~ not /
     r = requests.post(
         f"https://api.apify.com/v2/acts/{actor_id}/runs",
         params={"token": APIFY_API_KEY},
-        json=actor_input,
+        json={"input": actor_input},
         timeout=30,
     )
     r.raise_for_status()
@@ -153,25 +329,13 @@ def is_top_level(item):
 
 
 def build_actor_config(platform, form_data, tier):
+    """
+    Returns (actor_id, actor_input) for Apify-based platforms.
+    YouTube and Forum are handled separately in run_pipeline — not routed here.
+    """
     max_items = 2000 if tier == "deep" else 500
 
-    if platform == "youtube":
-        return "streamers~youtube-comments-scraper", {
-            "startUrls": form_data.get("youtube_video_urls", []),
-            "maxComments": max_items // 20,  # split across videos
-            "sortCommentsBy": "NEWEST_FIRST",
-        }
-
-    elif platform == "youtube_discover":
-        # Phase 1: discover video URLs from channel
-        posts = 20 if tier == "deep" else 10
-        return "streamers~youtube-scraper", {
-            "startUrls": [{"url": form_data.get("youtube_url", "")}],
-            "maxResults": posts,
-            "sortVideosBy": "NEWEST",
-        }
-
-    elif platform == "tiktok":
+    if platform == "tiktok":
         handle = form_data.get("tiktok_handle", "").lstrip("@")
         posts = 20
         return "clockworks/tiktok-comments-scraper", {
@@ -202,13 +366,173 @@ def build_actor_config(platform, form_data, tier):
         }
 
     elif platform == "trustpilot":
-        return "automation-lab~trustpilot", {
-            "companyUrls": [form_data.get("trustpilot_url", "")],
-            "maxReviewsPerCompany": max_items,
-            "sort": "recency",
+        # Uses automation-lab/trustpilot — takes domain, not full URL
+        domain = parse_trustpilot_domain(form_data.get("trustpilot_url", ""))
+        return "automation-lab/trustpilot", {
+            "domain": domain,
+            "maxReviews": max_items,
+        }
+
+    elif platform == "substack":
+        # Note: input schema may need adjustment on first live test
+        return "epctex/substack-scraper", {
+            "startUrls": [{"url": form_data.get("substack_url", "")}],
+            "maxItems": max_items,
+            "includeComments": True,
         }
 
     return None, None
+
+
+# ──────────────────────────────────────────────────────────────
+# Forum comment extraction (Claude Haiku preprocessing)
+# ──────────────────────────────────────────────────────────────
+
+def extract_forum_comments(raw_text, source_url, run_id):
+    """
+    Use Claude Haiku to extract individual comments from raw forum page text.
+    Called once per crawled page after website-content-crawler retrieves it.
+    Returns items in write_comment_row-compatible format.
+    """
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    prompt = f"""Extract individual user comments or posts from this forum page.
+
+Return ONLY a valid JSON array. Each object must have:
+- "text": the comment text (string, preserve original wording exactly)
+- "author": username or display name if visible (string, empty string if not identifiable)
+- "position": position in thread as integer (1 = first post or OP, incrementing)
+
+Rules:
+- Include only substantive user-written comments — exclude navigation, ads, boilerplate, and repeated headers
+- Preserve original wording; do not summarise or paraphrase
+- Maximum 100 comments per page
+- If you cannot identify any user comments, return an empty array: []
+- No preamble, no markdown fences — the JSON array only
+
+Forum page text:
+{raw_text[:8000]}"""
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        comments = json.loads(raw.strip())
+
+        items = []
+        for c in comments:
+            text = str(c.get("text", "")).strip()
+            if not text:
+                continue
+            items.append({
+                "comment": text,
+                "author":  c.get("author", ""),
+                "pageUrl": source_url,
+            })
+
+        log(run_id, f"Forum: extracted {len(items)} comments from {source_url}")
+        return items
+
+    except Exception as e:
+        log(run_id, f"Forum extraction failed for {source_url}: {e}")
+        return []
+
+
+# ──────────────────────────────────────────────────────────────
+# Google search volume (DataForSEO)
+# ──────────────────────────────────────────────────────────────
+
+def fetch_search_volume(brand_name, run_id):
+    """
+    Fetch Google result counts for community-intent terms via Apify google-search-scraper.
+    Terms: [brand] community / discord / forum / group
+    Returns dict {term: results_total} or None on failure.
+
+    resultsTotal is the 'About X results' figure Google shows — a proxy for inbound
+    search intent rather than exact monthly volume, but sufficient for scoring purposes.
+    """
+    terms = [
+        f"{brand_name} community",
+        f"{brand_name} discord",
+        f"{brand_name} forum",
+        f"{brand_name} group",
+    ]
+
+    actor_input = {
+        "queries":          "\n".join(terms),
+        "maxPagesPerQuery": 1,
+        "resultsPerPage":   10,
+        "countryCode":      "gb",
+        "languageCode":     "en",
+        "saveHtml":         False,
+        "saveMarkdown":     False,
+    }
+
+    try:
+        apify_run_id, dataset_id = create_apify_run(
+            "apify/google-search-scraper", actor_input, run_id
+        )
+        success = wait_for_apify_run(apify_run_id, run_id, timeout_minutes=10)
+        if not success:
+            log(run_id, "Search volume: Apify run failed")
+            return None
+
+        items = fetch_apify_dataset(dataset_id, run_id)
+
+        results = {}
+        for item in items:
+            term  = item.get("searchQuery", {}).get("term", "")
+            total = item.get("resultsTotal")
+            if term:
+                results[term] = total
+
+        log(run_id, f"Search volume (result counts): {results}")
+        return results
+
+    except Exception as e:
+        log(run_id, f"Search volume fetch failed: {e}")
+        return None
+
+
+def write_search_volume_to_notion(brand_page_id, volume_data, run_id):
+    """Append a search result count callout block to the brand page in Notion."""
+    if not volume_data:
+        return
+
+    lines = []
+    for term, total in volume_data.items():
+        lines.append(f"{term}: ~{total:,} results" if total else f"{term}: no results")
+    content = "  ·  ".join(lines)
+
+    payload = {
+        "children": [{
+            "object": "block",
+            "type": "callout",
+            "callout": {
+                "rich_text": [{"type": "text", "text": {"content": f"Search volume  —  {content}"}}],
+                "icon":  {"type": "emoji", "emoji": "🔍"},
+                "color": "gray_background",
+            },
+        }]
+    }
+
+    r = requests.patch(
+        f"https://api.notion.com/v1/blocks/{brand_page_id}/children",
+        headers=notion_headers(),
+        json=payload,
+        timeout=30,
+    )
+    if r.status_code == 200:
+        log(run_id, "Search volume written to brand page")
+    else:
+        log(run_id, f"Search volume Notion write failed: {r.status_code} — {r.text[:200]}")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -221,25 +545,25 @@ def create_comment_database(brand_page_id, brand_name, subject_tags, run_id):
 
     payload = {
         "parent": {"page_id": brand_page_id},
-        "title": [{"text": {"content": f"Comment Dataset — {brand_name} — {today}"}}],
+        "title":  [{"text": {"content": f"Comment Dataset — {brand_name} — {today}"}}],
         "properties": {
-            "Comment": {"title": {}},
+            "Comment":  {"title": {}},
             "Platform": {
                 "select": {
                     "options": [
-                        {"name": "YouTube"}, {"name": "TikTok"}, {"name": "Reddit"},
+                        {"name": "YouTube"}, {"name": "TikTok"},    {"name": "Reddit"},
                         {"name": "App Store"}, {"name": "Play Store"},
-                        {"name": "Trustpilot"}, {"name": "Forum"},
+                        {"name": "Trustpilot"}, {"name": "Substack"}, {"name": "Forum"},
                     ]
                 }
             },
-            "Source URL":    {"url": {}},
-            "Item URL":      {"url": {}},
-            "Published Date":{"rich_text": {}},
-            "Author":        {"rich_text": {}},
-            "Reply Count":   {"number": {}},
-            "Like Count":    {"number": {}},
-            "Item Title":    {"rich_text": {}},
+            "Source URL":     {"url": {}},
+            "Item URL":       {"url": {}},
+            "Published Date": {"rich_text": {}},
+            "Author":         {"rich_text": {}},
+            "Reply Count":    {"number": {}},
+            "Like Count":     {"number": {}},
+            "Item Title":     {"rich_text": {}},
             "Motivation Tag": {
                 "select": {"options": [{"name": t} for t in MOTIVATION_TAGS]}
             },
@@ -276,19 +600,30 @@ def write_comment_row(database_id, item, platform_label):
         "Platform": {"select": {"name": platform_label}},
     }
 
-    source_url = safe_url(item.get("pageUrl") or item.get("url") or item.get("videoUrl"))
+    source_url = safe_url(
+        item.get("pageUrl") or item.get("url") or
+        item.get("videoUrl") or item.get("sourceUrl")
+    )
     if source_url:
         props["Source URL"] = {"url": source_url}
 
-    item_url = safe_url(item.get("commentUrl") or item.get("replyUrl"))
+    item_url = safe_url(
+        item.get("commentUrl") or item.get("itemUrl") or item.get("replyUrl")
+    )
     if item_url:
         props["Item URL"] = {"url": item_url}
 
-    pub = str(item.get("publishedTimeText") or item.get("date") or item.get("publishedAt") or item.get("at") or "")
+    pub = str(
+        item.get("publishedTimeText") or item.get("date") or
+        item.get("publishedAt") or item.get("at") or ""
+    )
     if pub:
         props["Published Date"] = {"rich_text": [{"text": {"content": pub[:100]}}]}
 
-    author = str(item.get("authorText") or item.get("author") or item.get("userName") or item.get("user") or "")
+    author = str(
+        item.get("authorText") or item.get("author") or
+        item.get("userName") or item.get("user") or ""
+    )
     if author:
         props["Author"] = {"rich_text": [{"text": {"content": author[:200]}}]}
 
@@ -296,7 +631,11 @@ def write_comment_row(database_id, item, platform_label):
     if rc is not None:
         props["Reply Count"] = {"number": rc}
 
-    lc = safe_int(item.get("voteCount") or item.get("likes") or item.get("thumbsUpCount") or item.get("helpfulCount"))
+    # likeCount added for YouTube API compatibility
+    lc = safe_int(
+        item.get("likeCount") or item.get("voteCount") or
+        item.get("likes") or item.get("thumbsUpCount") or item.get("helpfulCount")
+    )
     if lc is not None:
         props["Like Count"] = {"number": lc}
 
@@ -383,9 +722,7 @@ Required format: [{{"id": "page-id-here", "motivation_tag": "Praise", "subject_t
 
 
 def update_row_tags(page_id, motivation_tag, subject_tag, untaggable=False):
-    props = {
-        "Untaggable": {"checkbox": untaggable},
-    }
+    props = {"Untaggable": {"checkbox": untaggable}}
     if not untaggable:
         props["Motivation Tag"] = {"select": {"name": motivation_tag}}
         props["Subject Tag"]    = {"select": {"name": subject_tag}}
@@ -404,78 +741,39 @@ def update_row_tags(page_id, motivation_tag, subject_tag, untaggable=False):
 
 def run_pipeline(run_id, form_data):
     try:
-        brand_name    = form_data["brand_name"]
-        page_id       = form_data["notion_page_id"].replace("-", "")
-        tier          = form_data.get("tier", "standard")
-        platforms     = form_data.get("platforms", [])
-        subject_tags  = [t.strip() for t in form_data.get("subject_tags", "").split(",") if t.strip()]
+        brand_name   = form_data["brand_name"]
+        page_id      = form_data["notion_page_id"].replace("-", "")
+        tier         = form_data.get("tier", "standard")
+        platforms    = form_data.get("platforms", [])
+        subject_tags = [t.strip() for t in form_data.get("subject_tags", "").split(",") if t.strip()]
 
         log(run_id, f"Pipeline started — {brand_name} | {tier} | platforms: {platforms}")
 
-        # Create Notion database
+        # ── Create Notion Comment Dataset database ──
         update_run(run_id, phase="Creating Notion database")
         db_id, db_url = create_comment_database(page_id, brand_name, subject_tags, run_id)
         update_run(run_id, database_url=db_url)
 
         total_written = 0
 
-        # ── Per-platform scrape ──
-        for platform in platforms:
+        # ── YouTube (official Data API v3, not Apify) ──
+        if "youtube" in platforms:
+            update_run(run_id, phase="Scraping YouTube")
+            max_yt   = 2000 if tier == "deep" else 500
+            yt_items = fetch_youtube_comments(form_data.get("youtube_url", ""), max_yt, run_id)
+            written  = 0
+            for item in yt_items:
+                ok, _ = write_comment_row(db_id, item, "YouTube")
+                if ok:
+                    written += 1
+                update_run(run_id, items_written=total_written + written)
+                time.sleep(0.34)
+            total_written += written
+            log(run_id, f"YouTube: {written} rows written to Notion")
 
-        # ── YouTube: use video URLs directly ──
-            if platform == "youtube":
-                label = "YouTube"
-                raw_urls = form_data.get("youtube_video_urls", "")
-                video_urls = [
-                    {"url": u.strip()}
-                    for u in raw_urls.replace("\n", ",").split(",")
-                    if u.strip() and "watch?v=" in u
-                ]
-
-                if not video_urls:
-                    log(run_id, "No valid YouTube video URLs provided — skipping")
-                    continue
-
-                log(run_id, f"Scraping comments from {len(video_urls)} YouTube videos")
-                update_run(run_id, phase="Scraping YouTube comments")
-
-                max_items = 2000 if tier == "deep" else 500
-                comment_input = {
-                    "startUrls": video_urls,
-                    "maxComments": max(10, max_items // len(video_urls)),
-                    "sortCommentsBy": "NEWEST_FIRST",
-                }
-
-                try:
-                    apify_run_id, dataset_id = create_apify_run(
-                        "streamers~youtube-comments-scraper", comment_input, run_id
-                    )
-                except Exception as e:
-                    log(run_id, f"Failed to start YouTube comments run: {e}")
-                    continue
-
-                success = wait_for_apify_run(apify_run_id, run_id)
-                if not success:
-                    log(run_id, "YouTube comments run failed — skipping")
-                    continue
-
-                update_run(run_id, phase="Retrieving YouTube comments")
-                items = fetch_apify_dataset(dataset_id, run_id)
-                top_level = [i for i in items if is_top_level(i)]
-                log(run_id, f"YouTube: {len(items)} items, {len(top_level)} top-level")
-
-                update_run(run_id, phase="Writing YouTube comments to Notion")
-                written = 0
-                for item in top_level:
-                    ok, _ = write_comment_row(db_id, item, label)
-                    if ok:
-                        written += 1
-                    update_run(run_id, items_written=total_written + written)
-                    time.sleep(0.34)
-
-                total_written += written
-                log(run_id, f"YouTube: {written} rows written")
-                continue
+        # ── Apify platforms (TikTok, Reddit, App Store, Play Store, Trustpilot, Substack) ──
+        apify_platforms = [p for p in platforms if p not in ("youtube", "forum")]
+        for platform in apify_platforms:
             actor_id, actor_input = build_actor_config(platform, form_data, tier)
             if not actor_id:
                 log(run_id, f"No actor configured for: {platform}")
@@ -512,7 +810,57 @@ def run_pipeline(run_id, form_data):
             total_written += written
             log(run_id, f"{label}: {written} rows written to Notion")
 
+        # ── Forum (website-content-crawler + Claude Haiku extraction) ──
+        if "forum" in platforms:
+            update_run(run_id, phase="Scraping forums")
+            forum_urls = parse_forum_urls(form_data.get("forum_urls", ""))
+
+            if not forum_urls:
+                log(run_id, "Forum: no URLs provided — skipping")
+            else:
+                log(run_id, f"Forum: crawling {len(forum_urls)} URL(s)")
+                try:
+                    apify_run_id, dataset_id = create_apify_run(
+                        "apify/website-content-crawler",
+                        {
+                            "startUrls":     [{"url": u} for u in forum_urls],
+                            "maxCrawlPages": len(forum_urls) * 5,
+                            "crawlerType":   "cheerio",
+                            "maxCrawlDepth": 1,
+                        },
+                        run_id,
+                    )
+                    success = wait_for_apify_run(apify_run_id, run_id)
+                    if success:
+                        crawled_pages = fetch_apify_dataset(dataset_id, run_id)
+                        log(run_id, f"Forum: {len(crawled_pages)} pages crawled")
+                        written = 0
+                        for page in crawled_pages:
+                            raw_text   = page.get("text") or page.get("markdown") or ""
+                            source_url = page.get("url", "")
+                            if not raw_text or not source_url:
+                                continue
+                            update_run(run_id, phase=f"Extracting comments from {source_url[:60]}…")
+                            comments = extract_forum_comments(raw_text, source_url, run_id)
+                            for comment in comments:
+                                ok, _ = write_comment_row(db_id, comment, "Forum")
+                                if ok:
+                                    written += 1
+                                update_run(run_id, items_written=total_written + written)
+                                time.sleep(0.34)
+                        total_written += written
+                        log(run_id, f"Forum: {written} rows written to Notion")
+                except Exception as e:
+                    log(run_id, f"Forum scraping failed: {e}")
+
         log(run_id, f"Collection complete — {total_written} total rows")
+
+        # ── Google search volume (Standard and Deep only) ──
+        if tier in ("standard", "deep"):
+            update_run(run_id, phase="Fetching search volume")
+            volume_data = fetch_search_volume(brand_name, run_id)
+            if volume_data:
+                write_search_volume_to_notion(page_id, volume_data, run_id)
 
         # ── Tagging ──
         if total_written > 0:
@@ -522,7 +870,7 @@ def run_pipeline(run_id, form_data):
 
             tagged = 0
             for i in range(0, len(rows), BATCH_SIZE):
-                batch = rows[i: i + BATCH_SIZE]
+                batch    = rows[i: i + BATCH_SIZE]
                 comments = [
                     {"id": r["id"], "text": extract_text(r)}
                     for r in batch if extract_text(r)
@@ -530,42 +878,31 @@ def run_pipeline(run_id, form_data):
                 if not comments:
                     continue
 
-                # Get tags — retry in two halves if JSON is truncated
-                tag_map = {}
                 try:
                     results = tag_batch(comments, subject_tags)
                     tag_map = {t["id"]: t for t in results}
-                except json.JSONDecodeError:
-                    log(run_id, f"Batch {i // BATCH_SIZE + 1} truncated — retrying in two halves")
-                    mid = len(comments) // 2
-                    for half in [comments[:mid], comments[mid:]]:
-                        try:
-                            tag_map.update({t["id"]: t for t in tag_batch(half, subject_tags)})
-                        except Exception as e:
-                            log(run_id, f"Half-batch failed: {e}")
+
+                    for comment in comments:
+                        tag = tag_map.get(comment["id"])
+                        if not tag:
+                            continue
+                        is_untaggable = tag.get("motivation_tag") == "Untaggable"
+                        ok = update_row_tags(
+                            comment["id"],
+                            tag.get("motivation_tag", ""),
+                            tag.get("subject_tag", ""),
+                            untaggable=is_untaggable,
+                        )
+                        if ok:
+                            tagged += 1
+                        time.sleep(0.34)
+
+                    update_run(run_id, items_tagged=tagged)
+                    log(run_id, f"Tagged {tagged} / {len(rows)} rows")
+                    time.sleep(1)
+
                 except Exception as e:
-                    log(run_id, f"Batch {i // BATCH_SIZE + 1} failed: {e}")
-                    continue
-
-                # Write tags to Notion
-                for comment in comments:
-                    tag = tag_map.get(comment["id"])
-                    if not tag:
-                        continue
-                    is_untaggable = tag.get("motivation_tag") == "Untaggable"
-                    ok = update_row_tags(
-                        comment["id"],
-                        tag.get("motivation_tag", ""),
-                        tag.get("subject_tag", ""),
-                        untaggable=is_untaggable,
-                    )
-                    if ok:
-                        tagged += 1
-                    time.sleep(0.34)
-
-                update_run(run_id, items_tagged=tagged)
-                log(run_id, f"Tagged {tagged} / {len(rows)} rows")
-                time.sleep(1)
+                    log(run_id, f"Tagging batch {i // BATCH_SIZE + 1} failed: {e}")
 
             log(run_id, f"Tagging complete — {tagged} rows tagged")
 
@@ -595,15 +932,15 @@ def start_run():
     data   = request.json
     run_id = str(uuid.uuid4())
     runs[run_id] = {
-        "status":       "running",
-        "phase":        "Starting",
-        "items_written": 0,
-        "items_tagged":  0,
-        "database_url":  None,
-        "error":         None,
-        "log":           [],
-        "started_at":    datetime.now().isoformat(),
-        "completed_at":  None,
+        "status":        "running",
+        "phase":         "Starting",
+        "items_written":  0,
+        "items_tagged":   0,
+        "database_url":   None,
+        "error":          None,
+        "log":            [],
+        "started_at":     datetime.now().isoformat(),
+        "completed_at":   None,
     }
     threading.Thread(target=run_pipeline, args=(run_id, data), daemon=True).start()
     return jsonify({"run_id": run_id})
