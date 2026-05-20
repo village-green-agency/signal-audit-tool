@@ -297,10 +297,15 @@
 
   .platform-fields.visible { display: block; }
 
-  .platform-fields input {
+  .platform-fields input,
+  .platform-fields textarea {
     margin-bottom: 0;
     font-size: 12px;
     padding: 10px 12px;
+  }
+
+  .platform-fields textarea {
+    min-height: 72px;
   }
 
   .field-hint {
@@ -450,7 +455,7 @@
       <div class="step-num">2</div>
       <div>
         <p class="step-label">Scraping</p>
-        <p class="step-sub">Apify collecting data</p>
+        <p class="step-sub">Collecting data</p>
       </div>
     </div>
     <div class="sidebar-step" id="step-3">
@@ -505,7 +510,7 @@
           <input type="radio" name="tier" id="tier_standard" value="standard" checked>
           <label class="tier-card" for="tier_standard">
             <span class="tier-name">Standard</span>
-            <span class="tier-detail">300–500 items<br>Full scoring<br>~£0.20</span>
+            <span class="tier-detail">300–500 items<br>Full scoring + search vol.<br>~£0.20</span>
           </label>
         </div>
         <div class="tier-option">
@@ -533,8 +538,8 @@
             <span class="platform-name">YouTube</span>
           </label>
           <div class="platform-fields" id="fields-youtube">
-            <textarea id="youtube_video_urls" rows="4" placeholder="https://www.youtube.com/watch?v=abc123&#10;https://www.youtube.com/watch?v=def456&#10;Paste one video URL per line — 10 to 20 recent videos recommended"></textarea>
-            <p class="field-hint">Paste recent video URLs from the channel, one per line. Find them by going to the channel → Videos → sorted by newest.</p>
+            <input type="url" id="youtube_url" placeholder="https://www.youtube.com/@channelname">
+            <p class="field-hint">Channel URL or @handle — comments collected via YouTube Data API</p>
           </div>
         </div>
 
@@ -559,6 +564,18 @@
           <div class="platform-fields" id="fields-reddit">
             <input type="text" id="reddit_term" placeholder="e.g. Joe Wicks body coach">
             <p class="field-hint">Only run if Reddit presence confirmed in Claude Chat</p>
+          </div>
+        </div>
+
+        <!-- Substack -->
+        <div class="platform-row" id="row-substack">
+          <label class="platform-check">
+            <input type="checkbox" data-platform="substack" onchange="togglePlatform('substack', this.checked)">
+            <span class="platform-name">Substack</span>
+          </label>
+          <div class="platform-fields" id="fields-substack">
+            <input type="url" id="substack_url" placeholder="https://publicationname.substack.com">
+            <p class="field-hint">Publication URL — only run if Substack presence confirmed in Claude Chat</p>
           </div>
         </div>
 
@@ -593,8 +610,20 @@
             <span class="platform-name">Trustpilot</span>
           </label>
           <div class="platform-fields" id="fields-trustpilot">
-            <input type="text" id="trustpilot_url" placeholder="e.g. seedtostage.com">
-            <p class="field-hint">Just the domain — not the full Trustpilot URL</p>
+            <input type="url" id="trustpilot_url" placeholder="https://www.trustpilot.com/review/thebodycoach.com">
+            <p class="field-hint">Full Trustpilot review page URL — domain parsed automatically</p>
+          </div>
+        </div>
+
+        <!-- Forum -->
+        <div class="platform-row" id="row-forum">
+          <label class="platform-check">
+            <input type="checkbox" data-platform="forum" onchange="togglePlatform('forum', this.checked)">
+            <span class="platform-name">Specialist forums</span>
+          </label>
+          <div class="platform-fields" id="fields-forum">
+            <textarea id="forum_urls" placeholder="https://www.mumsnet.com/talk/thread-url&#10;https://www.reddit.com/r/example/comments/thread-url&#10;One URL per line"></textarea>
+            <p class="field-hint">Paste specific thread URLs identified in Claude Chat — one per line. Claude extracts individual comments from each page.</p>
           </div>
         </div>
 
@@ -671,24 +700,24 @@
   function phaseToStep(phase) {
     if (!phase) return 1;
     const p = phase.toLowerCase();
-    if (p.includes('scraping') || p.includes('apify')) return 2;
-    if (p.includes('writing') || p.includes('retrieving') || p.includes('notion')) return 3;
+    if (p.includes('scraping') || p.includes('apify') || p.includes('forum') || p.includes('youtube')) return 2;
+    if (p.includes('writing') || p.includes('retrieving') || p.includes('extracting') || p.includes('search volume') || p.includes('notion')) return 3;
     if (p.includes('tagging') || p.includes('claude api')) return 4;
     if (p === 'done') return 5;
     return 1;
   }
 
   async function startRun() {
-    const brandName   = document.getElementById('brand_name').value.trim();
+    const brandName    = document.getElementById('brand_name').value.trim();
     const notionPageId = document.getElementById('notion_page_id').value.trim();
-    const tier        = document.querySelector('[name="tier"]:checked').value;
-    const platforms   = getSelectedPlatforms();
-    const subjectTags = document.getElementById('subject_tags').value.trim();
+    const tier         = document.querySelector('[name="tier"]:checked').value;
+    const platforms    = getSelectedPlatforms();
+    const subjectTags  = document.getElementById('subject_tags').value.trim();
 
-    if (!brandName)     { alert('Please enter a brand name.'); return; }
-    if (!notionPageId)  { alert('Please enter the Notion brand page ID.'); return; }
+    if (!brandName)        { alert('Please enter a brand name.'); return; }
+    if (!notionPageId)     { alert('Please enter the Notion brand page ID.'); return; }
     if (!platforms.length) { alert('Please select at least one platform.'); return; }
-    if (!subjectTags)   { alert('Please enter the confirmed subject tags.'); return; }
+    if (!subjectTags)      { alert('Please enter the confirmed subject tags.'); return; }
 
     const formData = {
       brand_name:     brandName,
@@ -696,12 +725,14 @@
       tier,
       platforms,
       subject_tags:   subjectTags,
-      youtube_video_urls: document.getElementById('youtube_video_urls')?.value.trim() || '',
+      youtube_url:    document.getElementById('youtube_url')?.value.trim()    || '',
       tiktok_handle:  document.getElementById('tiktok_handle')?.value.trim()  || '',
       reddit_term:    document.getElementById('reddit_term')?.value.trim()    || '',
+      substack_url:   document.getElementById('substack_url')?.value.trim()   || '',
       appstore_id:    document.getElementById('appstore_id')?.value.trim()    || '',
       playstore_id:   document.getElementById('playstore_id')?.value.trim()   || '',
       trustpilot_url: document.getElementById('trustpilot_url')?.value.trim() || '',
+      forum_urls:     document.getElementById('forum_urls')?.value.trim()     || '',
     };
 
     document.getElementById('submit-btn').disabled = true;
