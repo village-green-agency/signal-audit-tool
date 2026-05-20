@@ -3,7 +3,7 @@ app.py — The Village Hall Signal Audit Tool
 Runs the full pipeline: scrape → Notion write → Claude tagging
 
 Platforms:
-  YouTube    — official YouTube Data API v3 (not Apify)
+  YouTube    — official YouTube Data API v3
   TikTok     — Apify clockworks/tiktok-comments-scraper
   Reddit     — Apify trudax/reddit-scraper-lite
   App Store  — Apify canadesk/app-store-scraper
