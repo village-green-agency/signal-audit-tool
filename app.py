@@ -4,14 +4,14 @@ Runs the full pipeline: scrape → Notion write → tag (per platform)
 
 Platforms:
   YouTube    — official YouTube Data API v3
-  TikTok     — Apify clockworks/tiktok-comments-scraper
+  TikTok     — Apify clockworks/tiktok-scraper
   Reddit     — Apify trudax/reddit-scraper-lite
                Posts → Reddit Thread database (thread-level signal)
                Comments → Comment Dataset (same as all platforms)
   App Store  — Apify canadesk/app-store-scraper
   Play Store — Apify canadesk/google-play-scraper
   Trustpilot — Apify automation-lab/trustpilot
-  Substack   — Apify epctex/substack-scraper
+  Substack   — Apify website-content-crawler + Claude Haiku extraction (same path as Forum)
   Forum      — Apify apify/website-content-crawler + Claude Haiku extraction
 
 Additional:
@@ -333,13 +333,12 @@ def build_actor_config(platform, form_data, tier):
 
     if platform == "tiktok":
         handle = form_data.get("tiktok_handle", "").lstrip("@")
-        posts  = 20
-        return "clockworks/tiktok-comments-scraper", {
-            "profiles":            [handle],
-            "profileSorting":      "popular",
-            "maxRepliesPerComment": 0,
-            "commentsPerPost":     max_items // posts,
-            "postsPerProfile":     posts,
+        return "clockworks/tiktok-scraper", {
+            "profiles":             [f"https://www.tiktok.com/@{handle}"],
+            "resultsType":          "comments",
+            "maxItems":             max_items,
+            "shouldDownloadVideos": False,
+            "shouldDownloadCovers": False,
         }
 
     elif platform == "reddit":
@@ -366,13 +365,6 @@ def build_actor_config(platform, form_data, tier):
         return "automation-lab/trustpilot", {
             "domain":     domain,
             "maxReviews": max_items,
-        }
-
-    elif platform == "substack":
-        return "epctex/substack-scraper", {
-            "startUrls":      [{"url": form_data.get("substack_url", "")}],
-            "maxItems":       max_items,
-            "includeComments": True,
         }
 
     return None, None
@@ -457,10 +449,7 @@ def fetch_search_volume(brand_name, run_id):
         "queries":          "\n".join(terms),
         "maxPagesPerQuery": 1,
         "resultsPerPage":   10,
-        "countryCode":      "gb",
-        "languageCode":     "en",
-        "saveHtml":         False,
-        "saveMarkdown":     False,
+        "countryCode":      "GB",
     }
 
     try:
@@ -488,7 +477,99 @@ def fetch_search_volume(brand_name, run_id):
         return None
 
 
-def write_search_volume_to_notion(brand_page_id, volume_data, run_id):
+def discover_forum_urls(brand_name, run_id):
+    """
+    Use Google search to discover forum threads discussing the brand.
+    Runs two queries, filters out social media and the brand's own channels,
+    looks for forum-like URL patterns and known forum domains.
+    Returns a deduplicated list of up to 10 URLs to pass to the crawler.
+    """
+    queries = [
+        f'"{brand_name}" forum',
+        f'"{brand_name}" community thread discussion',
+    ]
+
+    # Domains that are handled by dedicated platform scrapers or are not forums
+    exclude_domains = {
+        "youtube.com", "twitter.com", "x.com", "instagram.com", "facebook.com",
+        "tiktok.com", "reddit.com", "pinterest.com", "linkedin.com",
+        "amazon.com", "amazon.co.uk", "trustpilot.com", "substack.com",
+        "google.com", "google.co.uk", "wikipedia.org",
+    }
+
+    # URL path fragments that suggest a forum thread rather than a homepage
+    forum_path_signals = [
+        "forum", "thread", "discussion", "community", "topic",
+        "post", "board", "talk", "chat", "qa", "question",
+    ]
+
+    # Known UK and general forum domains worth capturing even without path signals
+    known_forum_domains = {
+        "mumsnet.com", "netmums.com", "thestudentroom.co.uk",
+        "moneysavingexpert.com", "moneysupermarket.com",
+        "tripadvisor.co.uk", "tripadvisor.com",
+        "quora.com", "stackexchange.com",
+    }
+
+    actor_input = {
+        "queries":          "\n".join(queries),
+        "maxPagesPerQuery": 2,
+        "resultsPerPage":   10,
+        "countryCode":      "GB",
+    }
+
+    try:
+        apify_run_id, dataset_id = create_apify_run(
+            "apify/google-search-scraper", actor_input, run_id
+        )
+        success = wait_for_apify_run(apify_run_id, run_id, timeout_minutes=10)
+        if not success:
+            log(run_id, "Forum discovery: search run failed")
+            return []
+
+        items = fetch_apify_dataset(dataset_id, run_id)
+
+        discovered = []
+        for item in items:
+            for result in item.get("organicResults", []):
+                url = result.get("url", "")
+                if not url or not url.startswith("http"):
+                    continue
+
+                # Extract bare domain for filtering
+                try:
+                    domain = url.split("/")[2].lower().lstrip("www.")
+                except IndexError:
+                    continue
+
+                # Skip excluded domains
+                if any(ex in domain for ex in exclude_domains):
+                    continue
+
+                url_lower = url.lower()
+                is_forum_path   = any(sig in url_lower for sig in forum_path_signals)
+                is_known_domain = any(fd in domain for fd in known_forum_domains)
+
+                if is_forum_path or is_known_domain:
+                    discovered.append(url)
+
+        # Deduplicate, preserve order, cap at 10
+        seen = set()
+        unique = []
+        for u in discovered:
+            if u not in seen:
+                seen.add(u)
+                unique.append(u)
+        unique = unique[:10]
+
+        log(run_id, f"Forum discovery: {len(unique)} thread(s) found — {unique}")
+        return unique
+
+    except Exception as e:
+        log(run_id, f"Forum discovery failed: {e}")
+        return []
+
+
     """Append search result counts as a callout block on the brand page."""
     if not volume_data:
         return
@@ -1089,7 +1170,7 @@ def run_pipeline(run_id, form_data):
                 log(run_id, f"Reddit scraping failed: {e}")
 
         # ── All other Apify platforms ──
-        apify_platforms = [p for p in platforms if p not in ("youtube", "reddit", "forum")]
+        apify_platforms = [p for p in platforms if p not in ("youtube", "reddit", "forum", "substack")]
 
         for platform in apify_platforms:
             actor_id, actor_input = build_actor_config(platform, form_data, tier)
@@ -1132,54 +1213,78 @@ def run_pipeline(run_id, form_data):
             total_tagged += tagged
             update_run(run_id, items_tagged=total_tagged)
 
-        # ── Forum ──
+        # ── Forum + Substack (website-content-crawler + Claude Haiku extraction) ──
+        # Substack has no reliable Apify actor — routed through the same crawler path as forums.
+        # Forum URLs are discovered automatically via Google search; manual URLs are an optional
+        # override for threads the search misses.
+        crawl_urls      = []
+        crawl_label_map = {}  # url → platform label for correct Notion tagging
+
         if "forum" in platforms:
-            update_run(run_id, phase="Scraping forums")
-            forum_urls = parse_forum_urls(form_data.get("forum_urls", ""))
+            update_run(run_id, phase="Discovering forum threads")
+            discovered = discover_forum_urls(brand_name, run_id)
+            manual     = parse_forum_urls(form_data.get("forum_urls", ""))
+            # Combine: discovered first, then any manual additions not already in the list
+            all_forum_urls = discovered + [u for u in manual if u not in discovered]
+            if not all_forum_urls:
+                log(run_id, "Forum: no threads discovered or provided — skipping")
+            for u in all_forum_urls:
+                crawl_urls.append(u)
+                crawl_label_map[u] = "Forum"
 
-            if not forum_urls:
-                log(run_id, "Forum: no URLs provided — skipping")
-            else:
-                log(run_id, f"Forum: crawling {len(forum_urls)} URL(s)")
-                try:
-                    apify_run_id, dataset_id = create_apify_run(
-                        "apify/website-content-crawler",
-                        {
-                            "startUrls":     [{"url": u} for u in forum_urls],
-                            "maxCrawlPages": len(forum_urls) * 5,
-                            "crawlerType":   "cheerio",
-                            "maxCrawlDepth": 1,
-                        },
-                        run_id,
-                    )
-                    success = wait_for_apify_run(apify_run_id, run_id)
-                    if success:
-                        crawled_pages  = fetch_apify_dataset(dataset_id, run_id)
-                        log(run_id, f"Forum: {len(crawled_pages)} pages crawled")
-                        written = 0
-                        for page in crawled_pages:
-                            raw_text   = page.get("text") or page.get("markdown") or ""
-                            source_url = page.get("url", "")
-                            if not raw_text or not source_url:
-                                continue
-                            update_run(run_id, phase=f"Extracting comments from {source_url[:60]}…")
-                            comments = extract_forum_comments(raw_text, source_url, run_id)
-                            for comment in comments:
-                                ok, _ = write_comment_row(db_id, comment, "Forum")
-                                if ok:
-                                    written += 1
-                                update_run(run_id, items_written=total_written + written)
-                                time.sleep(0.34)
-                        total_written += written
-                        log(run_id, f"Forum: {written} rows written")
+        if "substack" in platforms:
+            substack_url = form_data.get("substack_url", "").strip()
+            if substack_url:
+                crawl_urls.append(substack_url)
+                crawl_label_map[substack_url] = "Substack"
 
-                        update_run(run_id, phase="Tagging forum comments")
-                        tagged = tag_untagged_rows(db_id, subject_tags, run_id)
-                        total_tagged += tagged
-                        update_run(run_id, items_tagged=total_tagged)
+        if crawl_urls:
+            log(run_id, f"Crawling {len(crawl_urls)} URL(s) via website-content-crawler")
+            try:
+                apify_run_id, dataset_id = create_apify_run(
+                    "apify/website-content-crawler",
+                    {
+                        "startUrls":     [{"url": u} for u in crawl_urls],
+                        "maxCrawlPages": len(crawl_urls) * 5,
+                        "crawlerType":   "cheerio",
+                        "maxCrawlDepth": 1,
+                    },
+                    run_id,
+                )
+                success = wait_for_apify_run(apify_run_id, run_id)
+                if success:
+                    crawled_pages = fetch_apify_dataset(dataset_id, run_id)
+                    log(run_id, f"Crawler: {len(crawled_pages)} pages retrieved")
+                    written = 0
+                    for page in crawled_pages:
+                        raw_text   = page.get("text") or page.get("markdown") or ""
+                        source_url = page.get("url", "")
+                        if not raw_text or not source_url:
+                            continue
+                        # Determine label: match source URL to the closest seed URL
+                        label = "Forum"
+                        for seed_url, seed_label in crawl_label_map.items():
+                            if seed_url in source_url or source_url.startswith(seed_url.rstrip("/")):
+                                label = seed_label
+                                break
+                        update_run(run_id, phase=f"Extracting {label} comments from {source_url[:50]}…")
+                        comments = extract_forum_comments(raw_text, source_url, run_id)
+                        for comment in comments:
+                            ok, _ = write_comment_row(db_id, comment, label)
+                            if ok:
+                                written += 1
+                            update_run(run_id, items_written=total_written + written)
+                            time.sleep(0.34)
+                    total_written += written
+                    log(run_id, f"Crawler: {written} rows written")
 
-                except Exception as e:
-                    log(run_id, f"Forum scraping failed: {e}")
+                    update_run(run_id, phase="Tagging crawled comments")
+                    tagged = tag_untagged_rows(db_id, subject_tags, run_id)
+                    total_tagged += tagged
+                    update_run(run_id, items_tagged=total_tagged)
+
+            except Exception as e:
+                log(run_id, f"Crawler failed: {e}")
 
         log(run_id, f"Collection complete — {total_written} rows, {total_tagged} tagged")
 
