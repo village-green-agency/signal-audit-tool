@@ -271,6 +271,7 @@ def fetch_youtube_comments(channel_input, max_items, run_id):
 # ──────────────────────────────────────────────────────────────
 
 def create_apify_run(actor_id, actor_input, run_id):
+    actor_id = actor_id.replace("/", "~")  # Apify REST API uses ~ not / as separator
     r = requests.post(
         f"https://api.apify.com/v2/acts/{actor_id}/runs",
         params={"token": APIFY_API_KEY},
