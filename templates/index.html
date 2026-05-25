@@ -6,477 +6,443 @@
 <title>Signal Audit — The Village Hall</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Josefin+Sans:wght@300;400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  :root {
-    --linen:      #e9dfd2;
-    --linen-dark: #d4c8b5;
-    --ink:        #1c1a17;
-    --ink-mid:    #4a4640;
-    --ink-light:  #7a756e;
-    --rust:       #7a3e1e;
-    --rust-light: #a05530;
-    --olive:      #4a5238;
-    --white:      #faf8f5;
-    --border:     rgba(28,26,23,0.12);
-    --border-mid: rgba(28,26,23,0.2);
-  }
+:root {
+  --hunter: #1F3B2A;
+  --cream:  #F4EFE3;
+  --ink:    #0F1419;
+  --ember:  #D9522F;
+  --ink-60: rgba(15,20,25,.6);
+  --ink-35: rgba(15,20,25,.35);
+  --border: rgba(15,20,25,.14);
+  --border-strong: rgba(15,20,25,.28);
+}
 
-  body {
-    font-family: 'Josefin Sans', sans-serif;
-    font-weight: 300;
-    background: var(--linen);
-    color: var(--ink);
-    min-height: 100vh;
-    padding: 0;
-  }
+body {
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+  background: var(--cream);
+  color: var(--ink);
+  min-height: 100vh;
+}
 
-  .page {
-    display: grid;
-    grid-template-columns: 340px 1fr;
-    min-height: 100vh;
-  }
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
 
-  /* ── Left panel ── */
-  .sidebar {
-    background: var(--ink);
-    color: var(--linen);
-    padding: 48px 36px;
-    display: flex;
-    flex-direction: column;
-    position: sticky;
-    top: 0;
-    height: 100vh;
-  }
+/* ── Sidebar ─────────────────────────────────────── */
+.sidebar {
+  background: var(--hunter);
+  padding: 44px 28px 44px 32px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
 
-  .wordmark {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 13px;
-    font-weight: 400;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--linen-dark);
-    margin-bottom: 48px;
-  }
+.wordmark {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: rgba(244,239,227,.35);
+  margin-bottom: 36px;
+}
 
-  .sidebar-title {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 32px;
-    font-weight: 400;
-    line-height: 1.2;
-    margin-bottom: 16px;
-    color: var(--linen);
-  }
+.sidebar h1 {
+  font-family: 'Fraunces', serif;
+  font-size: 28px;
+  font-weight: 300;
+  line-height: 1.15;
+  color: var(--cream);
+  margin-bottom: 10px;
+}
 
-  .sidebar-desc {
-    font-size: 12px;
-    font-weight: 300;
-    line-height: 1.8;
-    color: rgba(233,223,210,0.6);
-    margin-bottom: auto;
-  }
+.sidebar-desc {
+  font-size: 11px;
+  line-height: 1.9;
+  color: rgba(244,239,227,.45);
+  margin-bottom: auto;
+}
 
-  .sidebar-step {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    margin-bottom: 20px;
-    opacity: 0.4;
-    transition: opacity 0.3s;
-  }
+.steps {
+  margin-top: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
-  .sidebar-step.active { opacity: 1; }
-  .sidebar-step.done   { opacity: 0.6; }
+.step {
+  display: flex;
+  gap: 11px;
+  opacity: .28;
+  transition: opacity .25s;
+}
+.step.active { opacity: 1; }
+.step.done   { opacity: .5; }
 
-  .step-num {
-    width: 22px;
-    height: 22px;
-    border: 1px solid rgba(233,223,210,0.3);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 400;
-    letter-spacing: 0.05em;
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
+.step-num {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1px solid rgba(244,239,227,.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--cream);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.step-num.done {
+  background: rgba(244,239,227,.18);
+  border-color: rgba(244,239,227,.35);
+}
 
-  .step-num.done {
-    background: var(--olive);
-    border-color: var(--olive);
-  }
+.step-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--cream);
+}
+.step-sub {
+  font-size: 10px;
+  color: rgba(244,239,227,.4);
+  margin-top: 1px;
+}
 
-  .step-label {
-    font-size: 11px;
-    font-weight: 400;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    line-height: 1.5;
-    color: var(--linen);
-  }
+/* ── Main ────────────────────────────────────────── */
+.main {
+  padding: 44px 52px 80px;
+  max-width: 660px;
+}
 
-  .step-sub {
-    font-size: 11px;
-    font-weight: 300;
-    color: rgba(233,223,210,0.5);
-    line-height: 1.5;
-  }
+.section {
+  padding-bottom: 32px;
+  margin-bottom: 32px;
+  border-bottom: .5px solid var(--border);
+}
+.section:last-of-type { border-bottom: none; }
 
-  /* ── Main form area ── */
-  .main {
-    padding: 48px 64px 80px;
-    max-width: 720px;
-  }
+.section-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--ink-35);
+  margin-bottom: 18px;
+}
 
-  .section {
-    margin-bottom: 40px;
-    padding-bottom: 40px;
-    border-bottom: 0.5px solid var(--border);
-  }
+label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-60);
+  margin-bottom: 6px;
+}
 
-  .section:last-of-type {
-    border-bottom: none;
-  }
+input[type="text"],
+input[type="number"],
+textarea {
+  width: 100%;
+  background: #fff;
+  border: .5px solid var(--border-strong);
+  padding: 10px 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+  border-radius: 0;
+  transition: border-color .15s;
+  -webkit-appearance: none;
+  -moz-appearance: textfield;
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+textarea:focus { border-color: var(--hunter); }
 
-  .section-label {
-    font-size: 10px;
-    font-weight: 400;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: var(--ink-light);
-    margin-bottom: 20px;
-  }
+textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
 
-  label {
-    display: block;
-    font-size: 11px;
-    font-weight: 400;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--ink-mid);
-    margin-bottom: 8px;
-  }
+.mono { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 11.5px; }
 
-  input[type="text"],
-  input[type="url"],
-  textarea {
-    width: 100%;
-    background: var(--white);
-    border: 0.5px solid var(--border-mid);
-    border-radius: 2px;
-    padding: 12px 14px;
-    font-family: 'Josefin Sans', sans-serif;
-    font-size: 13px;
-    font-weight: 300;
-    color: var(--ink);
-    outline: none;
-    transition: border-color 0.2s;
-    margin-bottom: 20px;
-  }
+.hint {
+  font-size: 10px;
+  color: var(--ink-35);
+  margin-top: 4px;
+  line-height: 1.6;
+}
 
-  input[type="text"]:focus,
-  input[type="url"]:focus,
-  textarea:focus {
-    border-color: var(--rust);
-  }
+.field { margin-bottom: 18px; }
+.field:last-child { margin-bottom: 0; }
 
-  textarea {
-    resize: vertical;
-    min-height: 80px;
-    line-height: 1.6;
-  }
+/* ── Platform rows ───────────────────────────────── */
+.platform {
+  border: .5px solid var(--border-strong);
+  background: #fff;
+  margin-bottom: 8px;
+  transition: border-color .15s;
+}
+.platform.open { border-color: var(--hunter); }
 
-  .mono {
-    font-family: 'Courier New', monospace;
-    font-size: 12px;
-    letter-spacing: 0.02em;
-  }
+.platform-header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.platform-header input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--hunter);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.platform-name {
+  font-size: 13px;
+  font-weight: 500;
+  flex: 1;
+}
+.platform-tag {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-35);
+  background: rgba(15,20,25,.06);
+  padding: 2px 7px;
+}
 
-  /* Tier selector */
-  .tier-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
-  }
+.platform-body {
+  display: none;
+  padding: 0 14px 14px 38px;
+  border-top: .5px solid var(--border);
+}
+.platform-body.visible {
+  display: block;
+  padding-top: 14px;
+}
+.platform-body .field { margin-bottom: 14px; }
+.platform-body .field:last-child { margin-bottom: 0; }
 
-  .tier-option {
-    position: relative;
-  }
+/* ── Cost panel ──────────────────────────────────── */
+.cost {
+  display: none;
+  background: var(--hunter);
+  color: var(--cream);
+  padding: 18px 18px 16px;
+  margin-top: 10px;
+}
 
-  .tier-option input[type="radio"] {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
+.cost-heading {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: rgba(244,239,227,.38);
+  margin-bottom: 12px;
+}
 
-  .tier-card {
-    display: block;
-    border: 0.5px solid var(--border-mid);
-    border-radius: 2px;
-    padding: 16px 14px;
-    cursor: pointer;
-    background: var(--white);
-    transition: border-color 0.2s, background 0.2s;
-  }
+.cost-lines { display: flex; flex-direction: column; gap: 7px; margin-bottom: 11px; }
 
-  .tier-option input:checked + .tier-card {
-    border-color: var(--rust);
-    background: rgba(122,62,30,0.04);
-  }
+.cost-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.cost-line-label { font-size: 11px; color: rgba(244,239,227,.6); }
+.cost-line-val {
+  font-family: 'Fraunces', serif;
+  font-size: 13px;
+  font-weight: 300;
+  color: var(--cream);
+}
 
-  .tier-name {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 18px;
-    font-weight: 500;
-    display: block;
-    margin-bottom: 4px;
-    color: var(--ink);
-  }
+.cost-divider { height: .5px; background: rgba(244,239,227,.12); margin-bottom: 11px; }
 
-  .tier-detail {
-    font-size: 11px;
-    font-weight: 300;
-    color: var(--ink-light);
-    display: block;
-    line-height: 1.5;
-  }
+.cost-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.cost-total-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: rgba(244,239,227,.5);
+}
+.cost-total-val {
+  font-family: 'Fraunces', serif;
+  font-size: 22px;
+  font-weight: 300;
+  color: var(--cream);
+}
 
-  /* Platform checkboxes */
-  .platform-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin-bottom: 8px;
-  }
+.cost-note {
+  font-size: 9.5px;
+  color: rgba(244,239,227,.3);
+  line-height: 1.7;
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: .5px solid rgba(244,239,227,.08);
+}
 
-  .platform-row {
-    border: 0.5px solid transparent;
-    border-radius: 2px;
-    transition: border-color 0.2s;
-  }
+/* ── Submit ──────────────────────────────────────── */
+.submit {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  background: var(--ink);
+  color: var(--cream);
+  border: none;
+  padding: 14px 36px;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 8px;
+  transition: background .15s;
+}
+.submit:hover    { background: var(--hunter); }
+.submit:disabled { background: var(--ink-35); cursor: not-allowed; }
 
-  .platform-row.expanded {
-    border-color: var(--border);
-    background: var(--white);
-    margin-bottom: 8px;
-  }
+/* ── Status panel ────────────────────────────────── */
+#status {
+  display: none;
+  background: var(--hunter);
+  color: var(--cream);
+  padding: 26px;
+  margin-top: 24px;
+}
 
-  .platform-check {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 14px;
-    cursor: pointer;
-  }
+.status-phase {
+  font-family: 'Fraunces', serif;
+  font-size: 20px;
+  font-weight: 300;
+  margin-bottom: 5px;
+}
+.status-counts {
+  font-size: 10px;
+  color: rgba(244,239,227,.45);
+  letter-spacing: .08em;
+  margin-bottom: 18px;
+}
 
-  .platform-check input[type="checkbox"] {
-    width: 14px;
-    height: 14px;
-    accent-color: var(--rust);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
+.progress-track {
+  height: 1px;
+  background: rgba(244,239,227,.1);
+  margin-bottom: 18px;
+  position: relative;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--ember);
+  width: 0%;
+  transition: width .5s ease;
+}
+.progress-anim {
+  position: absolute;
+  top: 0; left: -50%;
+  width: 50%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(217,82,47,.5), transparent);
+  animation: sweep 1.8s infinite linear;
+}
+@keyframes sweep { from { left: -50%; } to { left: 150%; } }
 
-  .platform-name {
-    font-size: 13px;
-    font-weight: 300;
-    color: var(--ink);
-    flex: 1;
-  }
+.status-log {
+  font-size: 10px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  color: rgba(244,239,227,.38);
+  line-height: 2;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.log-line:last-child { color: rgba(244,239,227,.72); }
 
-  .platform-fields {
-    display: none;
-    padding: 0 14px 14px 40px;
-  }
+.notion-link {
+  display: none;
+  margin-top: 18px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--cream);
+  text-decoration: none;
+  border-bottom: .5px solid rgba(244,239,227,.28);
+  padding-bottom: 2px;
+  transition: border-color .15s;
+}
+.notion-link:hover { border-color: var(--cream); }
 
-  .platform-fields.visible { display: block; }
-
-  .platform-fields input,
-  .platform-fields textarea {
-    margin-bottom: 0;
-    font-size: 12px;
-    padding: 10px 12px;
-  }
-
-  .platform-fields textarea {
-    min-height: 72px;
-  }
-
-  .field-hint {
-    font-size: 10px;
-    font-weight: 300;
-    color: var(--ink-light);
-    margin-top: 4px;
-    margin-bottom: 12px;
-    letter-spacing: 0.04em;
-  }
-
-  /* Submit */
-  .submit-btn {
-    font-family: 'Josefin Sans', sans-serif;
-    font-size: 11px;
-    font-weight: 400;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    background: var(--ink);
-    color: var(--linen);
-    border: none;
-    border-radius: 2px;
-    padding: 16px 40px;
-    cursor: pointer;
-    transition: background 0.2s;
-    width: 100%;
-    margin-top: 8px;
-  }
-
-  .submit-btn:hover { background: var(--rust); }
-  .submit-btn:disabled { background: var(--ink-light); cursor: not-allowed; }
-
-  /* ── Status panel ── */
-  #status-panel {
-    display: none;
-    background: var(--ink);
-    color: var(--linen);
-    border-radius: 2px;
-    padding: 32px;
-    margin-top: 32px;
-  }
-
-  .status-phase {
-    font-family: 'Cormorant Garamond', serif;
-    font-size: 22px;
-    font-weight: 400;
-    margin-bottom: 8px;
-  }
-
-  .status-counts {
-    font-size: 11px;
-    font-weight: 300;
-    color: rgba(233,223,210,0.6);
-    letter-spacing: 0.1em;
-    margin-bottom: 24px;
-  }
-
-  .progress-bar-track {
-    height: 1px;
-    background: rgba(233,223,210,0.15);
-    margin-bottom: 24px;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .progress-bar-fill {
-    height: 100%;
-    background: var(--rust-light);
-    width: 0%;
-    transition: width 0.5s ease;
-  }
-
-  .progress-bar-indeterminate {
-    position: absolute;
-    top: 0;
-    left: -50%;
-    width: 50%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(160,85,48,0.6), transparent);
-    animation: slide 1.8s infinite linear;
-  }
-
-  @keyframes slide {
-    from { left: -50%; }
-    to   { left: 150%; }
-  }
-
-  .status-log {
-    font-size: 11px;
-    font-weight: 300;
-    line-height: 2;
-    color: rgba(233,223,210,0.45);
-    max-height: 160px;
-    overflow-y: auto;
-    font-family: 'Courier New', monospace;
-  }
-
-  .status-log-entry:last-child { color: rgba(233,223,210,0.8); }
-
-  .complete-link {
-    display: inline-block;
-    margin-top: 24px;
-    font-size: 11px;
-    font-weight: 400;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--linen);
-    text-decoration: none;
-    border-bottom: 0.5px solid rgba(233,223,210,0.3);
-    padding-bottom: 2px;
-    transition: border-color 0.2s;
-  }
-
-  .complete-link:hover { border-color: var(--linen); }
-
-  .error-msg {
-    font-size: 12px;
-    font-weight: 300;
-    color: #e07060;
-    margin-top: 16px;
-    line-height: 1.6;
-  }
+.error-msg {
+  font-size: 11px;
+  color: #e87860;
+  margin-top: 12px;
+  line-height: 1.6;
+  display: none;
+}
 </style>
 </head>
 <body>
-
-<div class="page">
+<div class="layout">
 
   <!-- Sidebar -->
   <aside class="sidebar">
     <p class="wordmark">The Village Hall</p>
-    <h1 class="sidebar-title">Signal<br>Audit</h1>
-    <p class="sidebar-desc" style="margin-bottom:48px;">
-      Scrapes comment and review data from selected platforms,
-      writes to Notion, and tags every row via the Claude API.
-      Open a Claude Chat session when complete to run analysis.
+    <h1>Signal<br>Audit</h1>
+    <p class="sidebar-desc">
+      Collects comment data from YouTube and TikTok, writes to Notion,
+      and tags every row via the Claude API. Open Claude Chat when complete
+      to run analysis.
     </p>
-
-    <div class="sidebar-step active" id="step-1">
-      <div class="step-num">1</div>
-      <div>
-        <p class="step-label">Setup</p>
-        <p class="step-sub">Brand, tier, platforms</p>
+    <div class="steps">
+      <div class="step active" id="step-1">
+        <div class="step-num">1</div>
+        <div>
+          <p class="step-label">Setup</p>
+          <p class="step-sub">Brand, platforms, volumes</p>
+        </div>
       </div>
-    </div>
-    <div class="sidebar-step" id="step-2">
-      <div class="step-num">2</div>
-      <div>
-        <p class="step-label">Scraping</p>
-        <p class="step-sub">Collecting data</p>
+      <div class="step" id="step-2">
+        <div class="step-num">2</div>
+        <div>
+          <p class="step-label">Scraping</p>
+          <p class="step-sub">Collecting comments</p>
+        </div>
       </div>
-    </div>
-    <div class="sidebar-step" id="step-3">
-      <div class="step-num">3</div>
-      <div>
-        <p class="step-label">Writing to Notion</p>
-        <p class="step-sub">Rows created in database</p>
+      <div class="step" id="step-3">
+        <div class="step-num">3</div>
+        <div>
+          <p class="step-label">Writing to Notion</p>
+          <p class="step-sub">Rows created in database</p>
+        </div>
       </div>
-    </div>
-    <div class="sidebar-step" id="step-4">
-      <div class="step-num">4</div>
-      <div>
-        <p class="step-label">Tagging</p>
-        <p class="step-sub">Claude API tagging each row</p>
+      <div class="step" id="step-4">
+        <div class="step-num">4</div>
+        <div>
+          <p class="step-label">Tagging</p>
+          <p class="step-sub">Claude API tagging each row</p>
+        </div>
       </div>
-    </div>
-    <div class="sidebar-step" id="step-5">
-      <div class="step-num">5</div>
-      <div>
-        <p class="step-label">Ready</p>
-        <p class="step-sub">Open Claude Chat for analysis</p>
+      <div class="step" id="step-5">
+        <div class="step-num">5</div>
+        <div>
+          <p class="step-label">Ready</p>
+          <p class="step-sub">Open Claude Chat for analysis</p>
+        </div>
       </div>
     </div>
   </aside>
@@ -484,319 +450,295 @@
   <!-- Form -->
   <main class="main">
 
+    <!-- Brand -->
     <div class="section">
       <p class="section-label">Brand</p>
-
-      <label for="brand_name">Brand or creator name</label>
-      <input type="text" id="brand_name" placeholder="e.g. Joe Wicks">
-
-      <label for="notion_page_id">Notion brand page ID</label>
-      <input type="text" id="notion_page_id" class="mono"
-        placeholder="e.g. 359dc12c-4b2b-8178-a517-e112663af7a6">
-      <p class="field-hint">Find this in the Notion URL of the brand's page, or ask Claude Chat.</p>
-    </div>
-
-    <div class="section">
-      <p class="section-label">Run tier</p>
-      <div class="tier-grid">
-        <div class="tier-option">
-          <input type="radio" name="tier" id="tier_basic" value="basic">
-          <label class="tier-card" for="tier_basic">
-            <span class="tier-name">Basic</span>
-            <span class="tier-detail">Web search only<br>No scraping<br>~£0</span>
-          </label>
-        </div>
-        <div class="tier-option">
-          <input type="radio" name="tier" id="tier_standard" value="standard" checked>
-          <label class="tier-card" for="tier_standard">
-            <span class="tier-name">Standard</span>
-            <span class="tier-detail">300–500 items<br>Full scoring + search vol.<br>~£0.20</span>
-          </label>
-        </div>
-        <div class="tier-option">
-          <input type="radio" name="tier" id="tier_deep" value="deep">
-          <label class="tier-card" for="tier_deep">
-            <span class="tier-name">Deep</span>
-            <span class="tier-detail">2,000+ items<br>Identity layer report<br>~£0.85</span>
-          </label>
-        </div>
+      <div class="field">
+        <label for="brand_name">Brand or creator name</label>
+        <input type="text" id="brand_name" placeholder="e.g. Joe Wicks">
+      </div>
+      <div class="field">
+        <label for="notion_page_id">Notion brand page ID</label>
+        <input type="text" id="notion_page_id" class="mono"
+          placeholder="e.g. 359dc12c-4b2b-8178-a517-e112663af7a6">
+        <p class="hint">Find this in the Notion URL of the brand page, or ask Claude Chat.</p>
       </div>
     </div>
 
+    <!-- Platforms -->
     <div class="section">
       <p class="section-label">Platforms</p>
-      <p class="field-hint" style="margin-bottom:16px;">
-        Paste the Platform Routing Output from Claude Chat. Tick only platforms with confirmed presence.
-      </p>
 
-      <div class="platform-list">
-
-        <!-- YouTube -->
-        <div class="platform-row" id="row-youtube">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="youtube" onchange="togglePlatform('youtube', this.checked)">
-            <span class="platform-name">YouTube</span>
-          </label>
-          <div class="platform-fields" id="fields-youtube">
-            <input type="url" id="youtube_url" placeholder="https://www.youtube.com/@channelname">
-            <p class="field-hint">Channel URL or @handle — comments collected via YouTube Data API</p>
+      <!-- YouTube -->
+      <div class="platform" id="row-youtube">
+        <div class="platform-header" onclick="togglePlatform('youtube', event)">
+          <input type="checkbox" id="chk-youtube" onchange="onCheck()">
+          <span class="platform-name">YouTube</span>
+          <span class="platform-tag">Data API</span>
+        </div>
+        <div class="platform-body" id="body-youtube">
+          <div class="field">
+            <label for="youtube_handle">Channel handle</label>
+            <input type="text" id="youtube_handle" placeholder="@channelname or channel URL"
+              oninput="recalc()">
+          </div>
+          <div class="field">
+            <label for="youtube_max">Comments to collect</label>
+            <input type="number" id="youtube_max" value="5000" min="100" step="100"
+              oninput="recalc()">
+            <p class="hint">Fetched from most recent videos, newest comments first.</p>
           </div>
         </div>
+      </div>
 
-        <!-- TikTok -->
-        <div class="platform-row" id="row-tiktok">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="tiktok" onchange="togglePlatform('tiktok', this.checked)">
-            <span class="platform-name">TikTok</span>
-          </label>
-          <div class="platform-fields" id="fields-tiktok">
-            <input type="text" id="tiktok_handle" placeholder="@handle or handle">
-            <p class="field-hint">Profile handle — with or without the @</p>
+      <!-- TikTok -->
+      <div class="platform" id="row-tiktok">
+        <div class="platform-header" onclick="togglePlatform('tiktok', event)">
+          <input type="checkbox" id="chk-tiktok" onchange="onCheck()">
+          <span class="platform-name">TikTok</span>
+          <span class="platform-tag">Apify</span>
+        </div>
+        <div class="platform-body" id="body-tiktok">
+          <div class="field">
+            <label for="tiktok_handle">Profile handle</label>
+            <input type="text" id="tiktok_handle" placeholder="@handle or handle"
+              oninput="recalc()">
+          </div>
+          <div class="field">
+            <label for="tiktok_max">Comments to collect</label>
+            <input type="number" id="tiktok_max" value="1000" min="100" step="100"
+              oninput="recalc()">
+            <p class="hint">Pulled from most recent posts.</p>
           </div>
         </div>
+      </div>
 
-        <!-- Reddit -->
-        <div class="platform-row" id="row-reddit">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="reddit" onchange="togglePlatform('reddit', this.checked)">
-            <span class="platform-name">Reddit</span>
-          </label>
-          <div class="platform-fields" id="fields-reddit">
-            <input type="text" id="reddit_term" placeholder="e.g. Joe Wicks body coach">
-            <p class="field-hint">Only run if Reddit presence confirmed in Claude Chat</p>
+      <!-- Cost estimate -->
+      <div class="cost" id="cost-panel">
+        <p class="cost-heading">Estimated cost</p>
+        <div class="cost-lines">
+          <div class="cost-line" id="cost-yt" style="display:none">
+            <span class="cost-line-label">YouTube — Data API</span>
+            <span class="cost-line-val">Free</span>
+          </div>
+          <div class="cost-line" id="cost-tt" style="display:none">
+            <span class="cost-line-label">TikTok — Apify</span>
+            <span class="cost-line-val" id="val-tt">—</span>
+          </div>
+          <div class="cost-line" id="cost-tag" style="display:none">
+            <span class="cost-line-label">Claude tagging</span>
+            <span class="cost-line-val" id="val-tag">—</span>
           </div>
         </div>
-
-        <!-- Substack -->
-        <div class="platform-row" id="row-substack">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="substack" onchange="togglePlatform('substack', this.checked)">
-            <span class="platform-name">Substack</span>
-          </label>
-          <div class="platform-fields" id="fields-substack">
-            <input type="url" id="substack_url" placeholder="https://publicationname.substack.com">
-            <p class="field-hint">Publication URL — only run if Substack presence confirmed in Claude Chat</p>
-          </div>
+        <div class="cost-divider"></div>
+        <div class="cost-total">
+          <span class="cost-total-label">Total</span>
+          <span class="cost-total-val" id="val-total">—</span>
         </div>
-
-        <!-- App Store -->
-        <div class="platform-row" id="row-appstore">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="appstore" onchange="togglePlatform('appstore', this.checked)">
-            <span class="platform-name">App Store</span>
-          </label>
-          <div class="platform-fields" id="fields-appstore">
-            <input type="text" id="appstore_id" placeholder="e.g. com.thebodycoach.bodycoach or numeric ID">
-            <p class="field-hint">App ID from the App Store URL</p>
-          </div>
-        </div>
-
-        <!-- Play Store -->
-        <div class="platform-row" id="row-playstore">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="playstore" onchange="togglePlatform('playstore', this.checked)">
-            <span class="platform-name">Google Play Store</span>
-          </label>
-          <div class="platform-fields" id="fields-playstore">
-            <input type="text" id="playstore_id" placeholder="e.g. com.thebodycoach.bodycoach">
-            <p class="field-hint">Package name from the Play Store URL</p>
-          </div>
-        </div>
-
-        <!-- Trustpilot -->
-        <div class="platform-row" id="row-trustpilot">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="trustpilot" onchange="togglePlatform('trustpilot', this.checked)">
-            <span class="platform-name">Trustpilot</span>
-          </label>
-          <div class="platform-fields" id="fields-trustpilot">
-            <input type="url" id="trustpilot_url" placeholder="https://www.trustpilot.com/review/thebodycoach.com">
-            <p class="field-hint">Full Trustpilot review page URL — domain parsed automatically</p>
-          </div>
-        </div>
-
-        <!-- Forum -->
-        <div class="platform-row" id="row-forum">
-          <label class="platform-check">
-            <input type="checkbox" data-platform="forum" onchange="togglePlatform('forum', this.checked)">
-            <span class="platform-name">Specialist forums</span>
-          </label>
-          <div class="platform-fields" id="fields-forum">
-            <textarea id="forum_urls" placeholder="Optional — additional thread URLs to include&#10;https://www.mumsnet.com/talk/thread-url&#10;One URL per line"></textarea>
-            <p class="field-hint">Thread URLs are discovered automatically via Google search. Add specific URLs here only if you want to include threads the search may miss.</p>
-          </div>
-        </div>
-
+        <p class="cost-note">
+          Indicative only. TikTok: ~£0.20 per 1,000 comments (Apify compute units).
+          Tagging: ~£0.08 per 1,000 comments (Claude Haiku).
+          YouTube Data API scraping has no Apify cost.
+        </p>
       </div>
     </div>
 
+    <!-- Subject tags -->
     <div class="section">
       <p class="section-label">Subject tags</p>
-      <label for="subject_tags">Confirmed tags from Claude Chat — comma separated</label>
-      <textarea id="subject_tags" rows="3"
-        placeholder="Workouts, Recipes & food, Transformation, Mental health, Kids & family fitness, Motivation & mindset, App & plans, Personal life, Controversy, Books & products"></textarea>
-      <p class="field-hint">These must be confirmed and locked in Claude Chat before running.</p>
+      <div class="field">
+        <label for="subject_tags">Confirmed tags from Claude Chat — comma separated</label>
+        <textarea id="subject_tags" rows="3"
+          placeholder="Workouts, Recipes & food, Transformation, Mental health, Motivation & mindset, App & plans"></textarea>
+        <p class="hint">Confirm and lock these in Claude Chat before running.</p>
+      </div>
     </div>
 
-    <button class="submit-btn" id="submit-btn" onclick="startRun()">
+    <button class="submit" id="submit-btn" onclick="startRun()">
       Run signal audit
     </button>
 
-    <!-- Status panel -->
-    <div id="status-panel">
-      <p class="status-phase" id="status-phase">Starting</p>
-      <p class="status-counts" id="status-counts">—</p>
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill" id="progress-fill"></div>
-        <div class="progress-bar-indeterminate" id="progress-indeterminate"></div>
+    <!-- Status -->
+    <div id="status">
+      <p class="status-phase" id="s-phase">Starting</p>
+      <p class="status-counts" id="s-counts">—</p>
+      <div class="progress-track">
+        <div class="progress-fill" id="s-fill"></div>
+        <div class="progress-anim" id="s-anim"></div>
       </div>
-      <div class="status-log" id="status-log"></div>
-      <a href="#" id="notion-link" class="complete-link" style="display:none;" target="_blank">
+      <div class="status-log" id="s-log"></div>
+      <a href="#" id="s-link" class="notion-link" target="_blank">
         Open Comment Dataset in Notion →
       </a>
-      <p class="error-msg" id="error-msg" style="display:none;"></p>
+      <p class="error-msg" id="s-err"></p>
     </div>
 
   </main>
 </div>
 
 <script>
-  let pollInterval = null;
+// ── Cost rates ────────────────────────────────────────────────
+const TIKTOK_PER_1K  = 0.20;  // £ per 1,000 TikTok comments (Apify)
+const TAGGING_PER_1K = 0.08;  // £ per 1,000 comments (Haiku)
 
-  function togglePlatform(platform, checked) {
-    const row    = document.getElementById('row-' + platform);
-    const fields = document.getElementById('fields-' + platform);
-    if (checked) {
-      row.classList.add('expanded');
-      fields.classList.add('visible');
-    } else {
-      row.classList.remove('expanded');
-      fields.classList.remove('visible');
+function fmt(n) {
+  return n > 0 ? '~£' + n.toFixed(2) : '—';
+}
+
+function recalc() {
+  const ytOn = document.getElementById('chk-youtube').checked;
+  const ttOn = document.getElementById('chk-tiktok').checked;
+
+  const panel = document.getElementById('cost-panel');
+  if (!ytOn && !ttOn) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+
+  const ytCount  = ytOn ? (parseInt(document.getElementById('youtube_max').value) || 0) : 0;
+  const ttCount  = ttOn ? (parseInt(document.getElementById('tiktok_max').value)  || 0) : 0;
+  const total    = ytCount + ttCount;
+
+  const ttCost      = (ttCount / 1000) * TIKTOK_PER_1K;
+  const taggingCost = (total  / 1000) * TAGGING_PER_1K;
+  const grand       = ttCost + taggingCost;
+
+  show('cost-yt',  ytOn);
+  show('cost-tt',  ttOn);
+  show('cost-tag', total > 0);
+
+  setText('val-tt',    fmt(ttCost));
+  setText('val-tag',   fmt(taggingCost));
+  setText('val-total', fmt(grand));
+}
+
+// ── Platform toggles ──────────────────────────────────────────
+function togglePlatform(id, e) {
+  if (e.target.type === 'checkbox') return;
+  const chk = document.getElementById('chk-' + id);
+  chk.checked = !chk.checked;
+  applyState(id, chk.checked);
+  recalc();
+}
+
+function onCheck() {
+  ['youtube', 'tiktok'].forEach(id =>
+    applyState(id, document.getElementById('chk-' + id).checked)
+  );
+  recalc();
+}
+
+function applyState(id, open) {
+  document.getElementById('row-'  + id).classList.toggle('open',    open);
+  document.getElementById('body-' + id).classList.toggle('visible', open);
+}
+
+// ── Submit ────────────────────────────────────────────────────
+async function startRun() {
+  const brand   = document.getElementById('brand_name').value.trim();
+  const pageId  = document.getElementById('notion_page_id').value.trim();
+  const tags    = document.getElementById('subject_tags').value.trim();
+  const plats   = ['youtube','tiktok'].filter(p => document.getElementById('chk-'+p).checked);
+
+  if (!brand)        { alert('Please enter a brand name.'); return; }
+  if (!pageId)       { alert('Please enter the Notion brand page ID.'); return; }
+  if (!plats.length) { alert('Please select at least one platform.'); return; }
+  if (!tags)         { alert('Please enter the confirmed subject tags.'); return; }
+
+  const payload = {
+    brand_name:            brand,
+    notion_page_id:        pageId,
+    platforms:             plats,
+    subject_tags:          tags,
+    youtube_handle:        document.getElementById('youtube_handle').value.trim(),
+    youtube_max_comments:  parseInt(document.getElementById('youtube_max').value)  || 5000,
+    tiktok_handle:         document.getElementById('tiktok_handle').value.trim(),
+    tiktok_max_comments:   parseInt(document.getElementById('tiktok_max').value)   || 1000,
+  };
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled    = true;
+  btn.textContent = 'Running…';
+
+  show('status', true, 'block');
+  hide('s-link'); hide('s-err');
+  show('s-anim', true, 'block');
+  setStep(2);
+
+  const res    = await fetch('/run', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload),
+  });
+  const { run_id } = await res.json();
+  setInterval(() => poll(run_id), 5000);
+}
+
+// ── Poll ──────────────────────────────────────────────────────
+async function poll(runId) {
+  const d = await (await fetch('/status/' + runId)).json();
+
+  setText('s-phase',  d.phase || '—');
+  setText('s-counts',
+    `${(d.items_written||0).toLocaleString()} rows collected · ${(d.items_tagged||0).toLocaleString()} rows tagged`
+  );
+
+  const log = document.getElementById('s-log');
+  log.innerHTML = (d.log || []).slice(-12).map(l => `<div class="log-line">${l}</div>`).join('');
+  log.scrollTop = log.scrollHeight;
+
+  setStep(phaseToStep(d.phase));
+
+  if (d.status === 'complete') {
+    hide('s-anim');
+    document.getElementById('s-fill').style.width = '100%';
+    document.getElementById('submit-btn').textContent = 'Run complete';
+    if (d.database_url) {
+      const lnk = document.getElementById('s-link');
+      lnk.href = d.database_url;
+      lnk.style.display = 'inline-block';
     }
+    setStep(5);
   }
 
-  function getSelectedPlatforms() {
-    return Array.from(document.querySelectorAll('[data-platform]:checked'))
-      .map(el => el.dataset.platform);
+  if (d.status === 'error') {
+    hide('s-anim');
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = false;
+    btn.textContent = 'Run signal audit';
+    const err = document.getElementById('s-err');
+    err.textContent = 'Error: ' + (d.error || 'Unknown. Check the log above.');
+    err.style.display = 'block';
   }
+}
 
-  function setStep(active) {
-    for (let i = 1; i <= 5; i++) {
-      const el = document.getElementById('step-' + i);
-      el.classList.remove('active', 'done');
-      const num = el.querySelector('.step-num');
-      num.classList.remove('done');
-      num.textContent = i;
-      if (i < active) {
-        el.classList.add('done');
-        num.classList.add('done');
-        num.textContent = '✓';
-      } else if (i === active) {
-        el.classList.add('active');
-      }
-    }
+// ── Steps ─────────────────────────────────────────────────────
+function phaseToStep(phase) {
+  if (!phase) return 1;
+  const p = phase.toLowerCase();
+  if (p.includes('scraping') || p.includes('youtube') || p.includes('tiktok')) return 2;
+  if (p.includes('writing') || p.includes('retrieving') || p.includes('notion')) return 3;
+  if (p.includes('tagging') || p.includes('claude')) return 4;
+  if (p === 'done') return 5;
+  return 1;
+}
+
+function setStep(n) {
+  for (let i = 1; i <= 5; i++) {
+    const el  = document.getElementById('step-' + i);
+    const num = el.querySelector('.step-num');
+    el.classList.remove('active','done');
+    num.classList.remove('done');
+    num.textContent = i;
+    if (i < n)      { el.classList.add('done'); num.classList.add('done'); num.textContent = '✓'; }
+    else if (i ===n){ el.classList.add('active'); }
   }
+}
 
-  function phaseToStep(phase) {
-    if (!phase) return 1;
-    const p = phase.toLowerCase();
-    if (p.includes('scraping') || p.includes('apify') || p.includes('forum') || p.includes('youtube')) return 2;
-    if (p.includes('writing') || p.includes('retrieving') || p.includes('extracting') || p.includes('search volume') || p.includes('notion')) return 3;
-    if (p.includes('tagging') || p.includes('claude api')) return 4;
-    if (p === 'done') return 5;
-    return 1;
-  }
-
-  async function startRun() {
-    const brandName    = document.getElementById('brand_name').value.trim();
-    const notionPageId = document.getElementById('notion_page_id').value.trim();
-    const tier         = document.querySelector('[name="tier"]:checked').value;
-    const platforms    = getSelectedPlatforms();
-    const subjectTags  = document.getElementById('subject_tags').value.trim();
-
-    if (!brandName)        { alert('Please enter a brand name.'); return; }
-    if (!notionPageId)     { alert('Please enter the Notion brand page ID.'); return; }
-    if (!platforms.length) { alert('Please select at least one platform.'); return; }
-    if (!subjectTags)      { alert('Please enter the confirmed subject tags.'); return; }
-
-    const formData = {
-      brand_name:     brandName,
-      notion_page_id: notionPageId,
-      tier,
-      platforms,
-      subject_tags:   subjectTags,
-      youtube_url:    document.getElementById('youtube_url')?.value.trim()    || '',
-      tiktok_handle:  document.getElementById('tiktok_handle')?.value.trim()  || '',
-      reddit_term:    document.getElementById('reddit_term')?.value.trim()    || '',
-      substack_url:   document.getElementById('substack_url')?.value.trim()   || '',
-      appstore_id:    document.getElementById('appstore_id')?.value.trim()    || '',
-      playstore_id:   document.getElementById('playstore_id')?.value.trim()   || '',
-      trustpilot_url: document.getElementById('trustpilot_url')?.value.trim() || '',
-      forum_urls:     document.getElementById('forum_urls')?.value.trim()     || '',
-    };
-
-    document.getElementById('submit-btn').disabled = true;
-    document.getElementById('submit-btn').textContent = 'Running…';
-    document.getElementById('status-panel').style.display = 'block';
-    document.getElementById('notion-link').style.display = 'none';
-    document.getElementById('error-msg').style.display   = 'none';
-    document.getElementById('progress-indeterminate').style.display = 'block';
-
-    setStep(2);
-
-    const res = await fetch('/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(formData),
-    });
-    const { run_id } = await res.json();
-
-    pollInterval = setInterval(() => pollStatus(run_id), 5000);
-  }
-
-  async function pollStatus(runId) {
-    const res  = await fetch('/status/' + runId);
-    const data = await res.json();
-
-    document.getElementById('status-phase').textContent = data.phase || '—';
-
-    const written = data.items_written || 0;
-    const tagged  = data.items_tagged  || 0;
-    document.getElementById('status-counts').textContent =
-      `${written} rows collected · ${tagged} rows tagged`;
-
-    const log = document.getElementById('status-log');
-    log.innerHTML = (data.log || []).slice(-12)
-      .map(l => `<div class="status-log-entry">${l}</div>`)
-      .join('');
-    log.scrollTop = log.scrollHeight;
-
-    setStep(phaseToStep(data.phase));
-
-    if (data.status === 'complete') {
-      clearInterval(pollInterval);
-      document.getElementById('progress-indeterminate').style.display = 'none';
-      document.getElementById('progress-fill').style.width = '100%';
-      document.getElementById('submit-btn').textContent = 'Run complete';
-
-      if (data.database_url) {
-        const link = document.getElementById('notion-link');
-        link.href = data.database_url;
-        link.style.display = 'inline-block';
-      }
-      setStep(5);
-    }
-
-    if (data.status === 'error') {
-      clearInterval(pollInterval);
-      document.getElementById('progress-indeterminate').style.display = 'none';
-      document.getElementById('submit-btn').disabled = false;
-      document.getElementById('submit-btn').textContent = 'Run signal audit';
-      const err = document.getElementById('error-msg');
-      err.textContent = 'Error: ' + (data.error || 'Unknown error. Check the log above.');
-      err.style.display = 'block';
-    }
-  }
+// ── Helpers ───────────────────────────────────────────────────
+function show(id, on = true, disp = 'flex') {
+  document.getElementById(id).style.display = on ? disp : 'none';
+}
+function hide(id) { document.getElementById(id).style.display = 'none'; }
+function setText(id, val) { document.getElementById(id).textContent = val; }
 </script>
 </body>
 </html>
