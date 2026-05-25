@@ -275,7 +275,7 @@ def fetch_apify_dataset(dataset_id, run_id):
 
 
 def is_top_level(item):
-    if item.get("parentId") or item.get("replyTo") or item.get("isReply"):
+    if item.get("repliesToId") or item.get("parentId") or item.get("replyTo") or item.get("isReply"):
         return False
     if str(item.get("type", "")).lower() == "reply":
         return False
@@ -371,7 +371,8 @@ def write_comment_row(database_id, item, platform_label):
     text = str(text)[:2000]
 
     reply_count = safe_int(item.get("replyCount") or item.get("repliesCount")) or 0
-    is_reply    = bool(item.get("parentId") or item.get("isReply") or
+    is_reply    = bool(item.get("repliesToId") or item.get("parentId") or
+                       item.get("isReply") or
                        str(item.get("type", "")).lower() == "reply")
     reply_to    = str(item.get("replyTo") or item.get("replyUsername") or "")
 
@@ -385,7 +386,7 @@ def write_comment_row(database_id, item, platform_label):
     if reply_to:
         props["Reply To"] = {"rich_text": [{"text": {"content": reply_to[:200]}}]}
 
-    parent_id = str(item.get("parentCommentId") or "")
+    parent_id = str(item.get("repliesToId") or item.get("parentCommentId") or "")
     if parent_id:
         props["Parent Comment ID"] = {"rich_text": [{"text": {"content": parent_id[:200]}}]}
 
@@ -629,13 +630,21 @@ def update_row_tags(page_id, motivation_tag, sentiment_tag, subject_tags, untagg
         props["Motivation Tag"] = {"select": {"name": motivation_tag}}
         props["Sentiment Tag"]  = {"select": {"name": sentiment_tag}}
         props["Subject Tag"]    = {"multi_select": [{"name": t} for t in subject_tags[:2] if t]}
-    r = requests.patch(
-        f"https://api.notion.com/v1/pages/{page_id}",
-        headers=notion_headers(),
-        json={"properties": props},
-        timeout=30,
-    )
-    return r.status_code == 200
+    for attempt in range(3):
+        try:
+            r = requests.patch(
+                f"https://api.notion.com/v1/pages/{page_id}",
+                headers=notion_headers(),
+                json={"properties": props},
+                timeout=30,
+            )
+            return r.status_code == 200
+        except requests.Timeout:
+            if attempt < 2:
+                time.sleep(2 ** attempt)  # 1s then 2s
+            else:
+                return False
+    return False
 
 
 def tag_platform_rows(db_id, subject_tags, run_id):
@@ -722,6 +731,8 @@ def run_pipeline(run_id, form_data):
                     if ok:
                         written += 1
                     update_run(run_id, items_written=total_written + written)
+                    if written % 100 == 0 and written > 0:
+                        log(run_id, f"YouTube: {written} rows written…")
                     time.sleep(0.34)
                 total_written += written
                 log(run_id, f"YouTube: {written} rows written")
@@ -745,6 +756,8 @@ def run_pipeline(run_id, form_data):
                     if ok:
                         written += 1
                     update_run(run_id, items_written=total_written + written)
+                    if written % 100 == 0 and written > 0:
+                        log(run_id, f"TikTok: {written} rows written…")
                     time.sleep(0.34)
                 total_written += written
                 log(run_id, f"TikTok: {written} rows written")
