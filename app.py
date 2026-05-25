@@ -289,11 +289,12 @@ def fetch_tiktok_comments(handle, max_items, run_id):
     Replies captured with parentCommentId for thread reconstruction.
     Not tagged — per Signal Scoring Framework doc.
     """
-    handle  = handle.lstrip("@")
-    profile = f"@{handle}"
+    handle = handle.lstrip("@")
     actor_input = {
-        "postURLs":             [profile],   # profile URL → actor finds recent videos
-        "commentsPerPost":      max_items,   # ceiling per video; actor stops at natural limit
+        "profiles":             [handle],    # username without @ — actor finds recent videos
+        "profileSorting":       "latest",    # most recent posts first
+        "commentsPerPost":      max_items,   # generous ceiling per post
+        "postsPerProfile":      30,          # cover enough posts to hit volume target
         "maxRepliesPerComment": 20,          # capture reply threads
     }
 
