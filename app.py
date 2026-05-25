@@ -290,7 +290,7 @@ def fetch_tiktok_comments(handle, max_items, run_id):
     Not tagged — per Signal Scoring Framework doc.
     """
     handle  = handle.lstrip("@")
-    profile = f"https://www.tiktok.com/@{handle}"
+    profile = f"@{handle}"
     actor_input = {
         "postURLs":             [profile],   # profile URL → actor finds recent videos
         "commentsPerPost":      max_items,   # ceiling per video; actor stops at natural limit
