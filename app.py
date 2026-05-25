@@ -285,15 +285,16 @@ def is_top_level(item):
 def fetch_tiktok_comments(handle, max_items, run_id):
     """
     clockworks/tiktok-comments-scraper.
-    profileSorting=latest → pulls from most recent posts first.
+    Input: profile URL → actor discovers recent videos automatically.
+    Replies captured with parentCommentId for thread reconstruction.
+    Not tagged — per Signal Scoring Framework doc.
     """
-    posts = 20
+    handle  = handle.lstrip("@")
+    profile = f"https://www.tiktok.com/@{handle}"
     actor_input = {
-        "profiles":            [handle.lstrip("@")],
-        "profileSorting":      "latest",   # most recent posts first
-        "maxRepliesPerComment": 0,
-        "commentsPerPost":     max(1, max_items // posts),
-        "postsPerProfile":     posts,
+        "postURLs":             [profile],   # profile URL → actor finds recent videos
+        "commentsPerPost":      max_items,   # ceiling per video; actor stops at natural limit
+        "maxRepliesPerComment": 20,          # capture reply threads
     }
 
     try:
@@ -336,6 +337,9 @@ def create_comment_database(brand_page_id, brand_name, subject_tags, run_id):
             "Reply Count":    {"number": {}},
             "Like Count":     {"number": {}},
             "Has Replies":    {"checkbox": {}},
+            "Is Reply":           {"checkbox": {}},
+            "Reply To":           {"rich_text": {}},
+            "Parent Comment ID":  {"rich_text": {}},
             "Item Title":     {"rich_text": {}},
             "Motivation Tag": {"select": {"options": [{"name": t} for t in MOTIVATION_TAGS]}},
             "Sentiment Tag":  {"select": {"options": [{"name": t} for t in SENTIMENT_TAGS]}},
@@ -366,12 +370,23 @@ def write_comment_row(database_id, item, platform_label):
     text = str(text)[:2000]
 
     reply_count = safe_int(item.get("replyCount") or item.get("repliesCount")) or 0
+    is_reply    = bool(item.get("parentId") or item.get("isReply") or
+                       str(item.get("type", "")).lower() == "reply")
+    reply_to    = str(item.get("replyTo") or item.get("replyUsername") or "")
 
     props = {
         "Comment":     {"title": [{"text": {"content": text}}]},
         "Platform":    {"select": {"name": platform_label}},
         "Has Replies": {"checkbox": reply_count > 0},
+        "Is Reply":    {"checkbox": is_reply},
     }
+
+    if reply_to:
+        props["Reply To"] = {"rich_text": [{"text": {"content": reply_to[:200]}}]}
+
+    parent_id = str(item.get("parentCommentId") or "")
+    if parent_id:
+        props["Parent Comment ID"] = {"rich_text": [{"text": {"content": parent_id[:200]}}]}
 
     source_url = safe_url(
         item.get("pageUrl") or item.get("url") or
@@ -533,7 +548,12 @@ def fetch_untagged_rows(database_id):
     rows, cursor = [], None
     while True:
         payload = {
-            "filter":    {"property": "Motivation Tag", "select": {"is_empty": True}},
+            "filter": {
+                "and": [
+                    {"property": "Motivation Tag", "select": {"is_empty": True}},
+                    {"property": "Is Reply",       "checkbox": {"equals": False}},
+                ]
+            },
             "page_size": 100,
         }
         if cursor:
