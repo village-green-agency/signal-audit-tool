@@ -370,7 +370,7 @@ def write_comment_row(database_id, item, platform_label):
     )
     text = str(text)[:2000]
 
-    reply_count = safe_int(item.get("replyCount") or item.get("repliesCount")) or 0
+    reply_count = safe_int(item.get("replyCommentTotal") or item.get("replyCount") or item.get("repliesCount")) or 0
     is_reply    = bool(item.get("repliesToId") or item.get("parentId") or
                        item.get("isReply") or
                        str(item.get("type", "")).lower() == "reply")
@@ -391,7 +391,7 @@ def write_comment_row(database_id, item, platform_label):
         props["Parent Comment ID"] = {"rich_text": [{"text": {"content": parent_id[:200]}}]}
 
     source_url = safe_url(
-        item.get("pageUrl") or item.get("url") or
+        item.get("videoWebUrl") or item.get("pageUrl") or item.get("url") or
         item.get("videoUrl") or item.get("sourceUrl")
     )
     if source_url:
@@ -402,7 +402,7 @@ def write_comment_row(database_id, item, platform_label):
         props["Item URL"] = {"url": item_url}
 
     pub = str(
-        item.get("publishedTimeText") or item.get("date") or
+        item.get("createTimeISO") or item.get("publishedTimeText") or item.get("date") or
         item.get("publishedAt") or item.get("at") or ""
     )
     if pub:
@@ -410,7 +410,7 @@ def write_comment_row(database_id, item, platform_label):
 
     author = str(
         item.get("author") or item.get("authorText") or
-        item.get("userName") or item.get("user") or ""
+        item.get("uniqueId") or item.get("userName") or item.get("user") or ""
     )
     if author:
         props["Author"] = {"rich_text": [{"text": {"content": author[:200]}}]}
@@ -419,7 +419,7 @@ def write_comment_row(database_id, item, platform_label):
         props["Reply Count"] = {"number": reply_count}
 
     lc = safe_int(
-        item.get("likeCount") or item.get("voteCount") or
+        item.get("diggCount") or item.get("likeCount") or item.get("voteCount") or
         item.get("likes") or item.get("thumbsUpCount") or item.get("helpfulCount")
     )
     if lc is not None:
