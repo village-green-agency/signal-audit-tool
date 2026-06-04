@@ -293,7 +293,7 @@ def fetch_tiktok_comments(handle, max_items, run_id):
     actor_input = {
         "profiles":             [handle],             # username without @ — actor finds recent videos
         "profileSorting":       "latest",             # most recent posts first
-        "commentsPerPost":      min(max_items, 500),  # cap per video at 500; spread across more posts
+        "commentsPerPost":      500,                   # hard per-video ceiling; overall cap via top_level[:max_items]
         "postsPerProfile":      30,                   # cover enough posts to hit volume target
         "maxRepliesPerComment": 10,                   # capture reply threads (not tagged; thread context only)
     }
