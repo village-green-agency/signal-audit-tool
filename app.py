@@ -285,17 +285,17 @@ def is_top_level(item):
 def fetch_tiktok_comments(handle, max_items, run_id):
     """
     clockworks/tiktok-comments-scraper.
-    Input: profile URL → actor discovers recent videos automatically.
-    Replies captured with parentCommentId for thread reconstruction.
-    Not tagged — per Signal Scoring Framework doc.
+    Input: profile handle → actor discovers recent videos automatically.
+    commentsPerPost capped at 500 to spread collection across more uploads.
+    maxRepliesPerComment set to 10 — replies are not tagged but captured for thread context.
     """
     handle = handle.lstrip("@")
     actor_input = {
-        "profiles":             [handle],    # username without @ — actor finds recent videos
-        "profileSorting":       "latest",    # most recent posts first
-        "commentsPerPost":      max_items,   # generous ceiling per post
-        "postsPerProfile":      30,          # cover enough posts to hit volume target
-        "maxRepliesPerComment": 20,          # capture reply threads
+        "profiles":             [handle],             # username without @ — actor finds recent videos
+        "profileSorting":       "latest",             # most recent posts first
+        "commentsPerPost":      min(max_items, 500),  # cap per video at 500; spread across more posts
+        "postsPerProfile":      30,                   # cover enough posts to hit volume target
+        "maxRepliesPerComment": 10,                   # capture reply threads (not tagged; thread context only)
     }
 
     try:
@@ -329,24 +329,24 @@ def create_comment_database(brand_page_id, brand_name, subject_tags, run_id):
         "parent": {"page_id": brand_page_id},
         "title":  [{"text": {"content": f"Comment Dataset — {brand_name} — {today}"}}],
         "properties": {
-            "Comment":        {"title": {}},
-            "Platform":       {"select": {"options": [{"name": "YouTube"}, {"name": "TikTok"}]}},
-            "Source URL":     {"url": {}},
-            "Item URL":       {"url": {}},
-            "Published Date": {"rich_text": {}},
-            "Author":         {"rich_text": {}},
-            "Reply Count":    {"number": {}},
-            "Like Count":     {"number": {}},
-            "Has Replies":    {"checkbox": {}},
-            "Is Reply":           {"checkbox": {}},
-            "Reply To":           {"rich_text": {}},
-            "Parent Comment ID":  {"rich_text": {}},
-            "Item Title":     {"rich_text": {}},
-            "Motivation Tag": {"select": {"options": [{"name": t} for t in MOTIVATION_TAGS]}},
-            "Sentiment Tag":  {"select": {"options": [{"name": t} for t in SENTIMENT_TAGS]}},
-            "Subject Tag":    {"multi_select": {"options": subject_options}},
-            "Untaggable":     {"checkbox": {}},
-            "Note":           {"rich_text": {}},
+            "Comment":           {"title": {}},
+            "Platform":          {"select": {"options": [{"name": "YouTube"}, {"name": "TikTok"}]}},
+            "Source URL":        {"url": {}},
+            "Item URL":          {"url": {}},
+            "Published Date":    {"rich_text": {}},
+            "Author":            {"rich_text": {}},
+            "Reply Count":       {"number": {}},
+            "Like Count":        {"number": {}},
+            "Has Replies":       {"checkbox": {}},
+            "Is Reply":          {"checkbox": {}},
+            "Reply To":          {"rich_text": {}},
+            "Parent Comment ID": {"rich_text": {}},
+            "Item Title":        {"rich_text": {}},
+            "Motivation Tag":    {"select": {"options": [{"name": t} for t in MOTIVATION_TAGS]}},
+            "Sentiment Tag":     {"select": {"options": [{"name": t} for t in SENTIMENT_TAGS]}},
+            "Subject Tag":       {"multi_select": {"options": subject_options}},
+            "Untaggable":        {"checkbox": {}},
+            "Note":              {"rich_text": {}},
         },
     }
 
