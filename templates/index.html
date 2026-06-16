@@ -173,8 +173,6 @@ textarea:focus { border-color: var(--hunter); }
 
 textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
 
-.mono { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 11.5px; }
-
 .hint {
   font-size: 10px;
   color: var(--ink-35);
@@ -372,20 +370,21 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
 }
 .log-line:last-child { color: rgba(244,239,227,.72); }
 
-.notion-link {
+.download-btn {
   display: none;
-  margin-top: 18px;
+  margin-top: 20px;
+  font-family: 'Inter', sans-serif;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: .14em;
+  letter-spacing: .18em;
   text-transform: uppercase;
-  color: var(--cream);
+  background: var(--cream);
+  color: var(--hunter);
   text-decoration: none;
-  border-bottom: .5px solid rgba(244,239,227,.28);
-  padding-bottom: 2px;
-  transition: border-color .15s;
+  padding: 11px 22px;
+  transition: opacity .15s;
 }
-.notion-link:hover { border-color: var(--cream); }
+.download-btn:hover { opacity: .85; }
 
 .error-msg {
   font-size: 11px;
@@ -404,9 +403,9 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
     <p class="wordmark">The Village Hall</p>
     <h1>Signal<br>Audit</h1>
     <p class="sidebar-desc">
-      Collects comment data from YouTube and TikTok, writes to Notion,
-      and tags every row via the Claude API. Open Claude Chat when complete
-      to run analysis.
+      Collects comment data from YouTube and TikTok,
+      tags every row via the Claude API, and exports a CSV
+      ready to load into Claude Chat for analysis.
     </p>
     <div class="steps">
       <div class="step active" id="step-1">
@@ -419,29 +418,22 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
       <div class="step" id="step-2">
         <div class="step-num">2</div>
         <div>
-          <p class="step-label">Scraping</p>
-          <p class="step-sub">Collecting comments</p>
+          <p class="step-label">Collecting</p>
+          <p class="step-sub">Scraping comments</p>
         </div>
       </div>
       <div class="step" id="step-3">
         <div class="step-num">3</div>
         <div>
-          <p class="step-label">Writing to Notion</p>
-          <p class="step-sub">Rows created in database</p>
+          <p class="step-label">Tagging</p>
+          <p class="step-sub">Claude API tagging each row</p>
         </div>
       </div>
       <div class="step" id="step-4">
         <div class="step-num">4</div>
         <div>
-          <p class="step-label">Tagging</p>
-          <p class="step-sub">Claude API tagging each row</p>
-        </div>
-      </div>
-      <div class="step" id="step-5">
-        <div class="step-num">5</div>
-        <div>
           <p class="step-label">Ready</p>
-          <p class="step-sub">Open Claude Chat for analysis</p>
+          <p class="step-sub">Download CSV for analysis</p>
         </div>
       </div>
     </div>
@@ -456,12 +448,7 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
       <div class="field">
         <label for="brand_name">Brand or creator name</label>
         <input type="text" id="brand_name" placeholder="e.g. Joe Wicks">
-      </div>
-      <div class="field">
-        <label for="notion_page_id">Notion brand page ID</label>
-        <input type="text" id="notion_page_id" class="mono"
-          placeholder="e.g. 359dc12c-4b2b-8178-a517-e112663af7a6">
-        <p class="hint">Find this in the Notion URL of the brand page, or ask Claude Chat.</p>
+        <p class="hint">Used to name the output CSV file.</p>
       </div>
     </div>
 
@@ -567,8 +554,8 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
         <div class="progress-anim" id="s-anim"></div>
       </div>
       <div class="status-log" id="s-log"></div>
-      <a href="#" id="s-link" class="notion-link" target="_blank">
-        Open Comment Dataset in Notion →
+      <a href="#" id="s-link" class="download-btn">
+        Download comment CSV →
       </a>
       <p class="error-msg" id="s-err"></p>
     </div>
@@ -633,19 +620,16 @@ function applyState(id, open) {
 
 // ── Submit ────────────────────────────────────────────────────
 async function startRun() {
-  const brand   = document.getElementById('brand_name').value.trim();
-  const pageId  = document.getElementById('notion_page_id').value.trim();
-  const tags    = document.getElementById('subject_tags').value.trim();
-  const plats   = ['youtube','tiktok'].filter(p => document.getElementById('chk-'+p).checked);
+  const brand  = document.getElementById('brand_name').value.trim();
+  const tags   = document.getElementById('subject_tags').value.trim();
+  const plats  = ['youtube','tiktok'].filter(p => document.getElementById('chk-'+p).checked);
 
   if (!brand)        { alert('Please enter a brand name.'); return; }
-  if (!pageId)       { alert('Please enter the Notion brand page ID.'); return; }
   if (!plats.length) { alert('Please select at least one platform.'); return; }
   if (!tags)         { alert('Please enter the confirmed subject tags.'); return; }
 
   const payload = {
     brand_name:            brand,
-    notion_page_id:        pageId,
     platforms:             plats,
     subject_tags:          tags,
     youtube_handle:        document.getElementById('youtube_handle').value.trim(),
@@ -678,7 +662,7 @@ async function poll(runId) {
 
   setText('s-phase',  d.phase || '—');
   setText('s-counts',
-    `${(d.items_written||0).toLocaleString()} rows collected · ${(d.items_tagged||0).toLocaleString()} rows tagged`
+    `${(d.items_written||0).toLocaleString()} collected · ${(d.items_tagged||0).toLocaleString()} tagged`
   );
 
   const log = document.getElementById('s-log');
@@ -691,12 +675,10 @@ async function poll(runId) {
     hide('s-anim');
     document.getElementById('s-fill').style.width = '100%';
     document.getElementById('submit-btn').textContent = 'Run complete';
-    if (d.database_url) {
-      const lnk = document.getElementById('s-link');
-      lnk.href = d.database_url;
-      lnk.style.display = 'inline-block';
-    }
-    setStep(5);
+    const lnk = document.getElementById('s-link');
+    lnk.href = `/download/${runId}`;
+    lnk.style.display = 'inline-block';
+    setStep(4);
   }
 
   if (d.status === 'error') {
@@ -714,22 +696,21 @@ async function poll(runId) {
 function phaseToStep(phase) {
   if (!phase) return 1;
   const p = phase.toLowerCase();
-  if (p.includes('scraping') || p.includes('youtube') || p.includes('tiktok')) return 2;
-  if (p.includes('writing') || p.includes('retrieving') || p.includes('notion')) return 3;
-  if (p.includes('tagging') || p.includes('claude')) return 4;
-  if (p === 'done') return 5;
+  if (p.includes('scraping') || p.includes('youtube') || p.includes('tiktok') || p.includes('collecting')) return 2;
+  if (p.includes('tagging') || p.includes('generating') || p.includes('csv')) return 3;
+  if (p === 'done') return 4;
   return 1;
 }
 
 function setStep(n) {
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= 4; i++) {
     const el  = document.getElementById('step-' + i);
     const num = el.querySelector('.step-num');
     el.classList.remove('active','done');
     num.classList.remove('done');
     num.textContent = i;
-    if (i < n)      { el.classList.add('done'); num.classList.add('done'); num.textContent = '✓'; }
-    else if (i ===n){ el.classList.add('active'); }
+    if (i < n)       { el.classList.add('done'); num.classList.add('done'); num.textContent = '✓'; }
+    else if (i === n){ el.classList.add('active'); }
   }
 }
 
