@@ -1,37 +1,36 @@
 """
 app.py — The Village Hall Signal Audit Tool
 Platforms: YouTube (Data API v3) · TikTok (Apify clockworks/tiktok-comments-scraper)
+Output: CSV download (Notion dependency removed)
 """
 
-import os
-import uuid
+import csv
+import io
 import json
-import time
+import os
 import threading
-from datetime import datetime, date
+import time
+import uuid
+from datetime import date, datetime
 
-import requests
-from flask import Flask, request, jsonify, send_from_directory
-from dotenv import load_dotenv
 import anthropic
+import requests
+from dotenv import load_dotenv
+from flask import Flask, jsonify, make_response, request, send_from_directory
 
 load_dotenv()
 
 app = Flask(__name__, template_folder="templates")
 
 APIFY_API_KEY     = os.getenv("APIFY_API_KEY", "")
-NOTION_API_KEY    = os.getenv("NOTION_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 YOUTUBE_API_KEY   = os.getenv("YOUTUBE_API_KEY", "")
 
-NOTION_VERSION   = "2022-06-28"
 BATCH_SIZE       = 40
 YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
 
 # Six-tag motivation system (canonical — see Signal Scoring Framework doc)
-MOTIVATION_TAGS = [
-    "Praise", "Criticism", "Question", "Suggestion", "Comparison", "Sharing",
-]
+MOTIVATION_TAGS = ["Praise", "Criticism", "Question", "Suggestion", "Comparison", "Sharing"]
 
 MOTIVATION_DEFINITIONS = """
 - Praise: positive judgment of the brand, content, or product ("love this", "incredible", "this changed everything for me")
@@ -44,6 +43,13 @@ MOTIVATION_DEFINITIONS = """
 
 SENTIMENT_TAGS = ["Positive", "Negative", "Neutral", "Mixed"]
 
+CSV_COLUMNS = [
+    "comment", "platform", "author", "published_date",
+    "like_count", "reply_count", "has_replies",
+    "source_url", "comment_url", "item_title",
+    "motivation_tag", "sentiment_tag", "subject_tags", "untaggable",
+]
+
 runs = {}
 
 
@@ -51,30 +57,27 @@ runs = {}
 # Utilities
 # ──────────────────────────────────────────────────────────────
 
-def notion_headers():
-    return {
-        "Authorization": f"Bearer {NOTION_API_KEY}",
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-    }
-
 def update_run(run_id, **kwargs):
     runs[run_id].update(kwargs)
+
 
 def log(run_id, message):
     ts = datetime.now().strftime("%H:%M:%S")
     runs[run_id].setdefault("log", []).append(f"[{ts}] {message}")
     print(f"[{run_id[:8]}] {message}")
 
+
 def safe_url(value):
     v = str(value).strip() if value else ""
     return v if v.startswith("http") else None
+
 
 def safe_int(value):
     try:
         return int(value)
     except (TypeError, ValueError):
         return None
+
 
 def parse_youtube_handle(raw):
     s = raw.strip()
@@ -89,6 +92,62 @@ def parse_youtube_handle(raw):
     return s.lstrip("@")
 
 
+def normalize_comment(item, platform):
+    """Normalise a raw Apify / YouTube comment dict into a consistent flat structure."""
+    text = (
+        item.get("comment") or item.get("text") or item.get("body") or
+        item.get("content") or ""
+    )
+    text = str(text)[:2000]
+
+    author = str(
+        item.get("author") or item.get("authorText") or
+        item.get("userName") or item.get("user") or ""
+    )[:200]
+
+    pub = str(
+        item.get("publishedAt") or item.get("publishedTimeText") or
+        item.get("date") or item.get("at") or ""
+    )[:100]
+
+    like_count = safe_int(
+        item.get("likeCount") or item.get("voteCount") or
+        item.get("likes") or item.get("thumbsUpCount") or 0
+    ) or 0
+
+    reply_count = safe_int(
+        item.get("replyCount") or item.get("repliesCount") or 0
+    ) or 0
+
+    source_url = safe_url(
+        item.get("pageUrl") or item.get("url") or
+        item.get("videoUrl") or item.get("sourceUrl") or ""
+    ) or ""
+
+    comment_url = safe_url(
+        item.get("commentUrl") or item.get("itemUrl") or ""
+    ) or ""
+
+    item_title = str(item.get("videoTitle") or item.get("title") or "")[:200]
+
+    return {
+        "comment":        text,
+        "platform":       platform,
+        "author":         author,
+        "published_date": pub,
+        "like_count":     like_count,
+        "reply_count":    reply_count,
+        "has_replies":    reply_count > 0,
+        "source_url":     source_url,
+        "comment_url":    comment_url,
+        "item_title":     item_title,
+        "motivation_tag": "",
+        "sentiment_tag":  "",
+        "subject_tags":   "",
+        "untaggable":     False,
+    }
+
+
 # ──────────────────────────────────────────────────────────────
 # YouTube Data API v3
 # ──────────────────────────────────────────────────────────────
@@ -97,7 +156,7 @@ def fetch_youtube_comments(channel_input, max_items, run_id):
     """
     Collect top-level comments via YouTube Data API v3.
     Flow: resolve handle → uploads playlist → video IDs → commentThreads (order=time).
-    Fetches from the most recent videos, most recent comments first within each video.
+    Fetches most-recent videos, most-recent comments first within each video.
     Quota: ~2–3 units per video. Limit is 10,000 units/day.
     """
     if not YOUTUBE_API_KEY:
@@ -121,14 +180,14 @@ def fetch_youtube_comments(channel_input, max_items, run_id):
             log(run_id, f"YouTube: channel not found for '{handle}'")
             return []
         uploads_playlist_id = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
-        log(run_id, f"YouTube: resolved → uploads playlist {uploads_playlist_id}")
+        log(run_id, f"YouTube: resolved → {uploads_playlist_id}")
     except Exception as e:
         log(run_id, f"YouTube: channel resolution failed — {e}")
         return []
 
-    # 2. Get recent video IDs from uploads playlist (playlist is already newest-first)
-    video_ids = []
-    next_page = None
+    # 2. Get recent video IDs from uploads playlist (already newest-first)
+    video_ids     = []
+    next_page     = None
     target_videos = max(20, max_items // 100)
 
     while len(video_ids) < target_videos:
@@ -171,11 +230,11 @@ def fetch_youtube_comments(channel_input, max_items, run_id):
 
         while vid_count < per_video_target:
             params = {
-                "key":       YOUTUBE_API_KEY,
-                "videoId":   video_id,
-                "part":      "snippet",
+                "key":        YOUTUBE_API_KEY,
+                "videoId":    video_id,
+                "part":       "snippet",
                 "maxResults": 100,
-                "order":     "time",   # most recent comments first
+                "order":      "time",
             }
             if next_page:
                 params["pageToken"] = next_page
@@ -183,7 +242,7 @@ def fetch_youtube_comments(channel_input, max_items, run_id):
             try:
                 r = requests.get(f"{YOUTUBE_API_BASE}/commentThreads", params=params, timeout=15)
                 if r.status_code == 403:
-                    break  # Comments disabled — skip silently
+                    break  # Comments disabled on this video — skip silently
                 r.raise_for_status()
                 data = r.json()
             except Exception as e:
@@ -191,15 +250,14 @@ def fetch_youtube_comments(channel_input, max_items, run_id):
                 break
 
             for item in data.get("items", []):
-                tl          = item["snippet"]["topLevelComment"]["snippet"]
-                comment_id  = item["id"]
-                reply_count = item["snippet"].get("totalReplyCount", 0)
+                tl         = item["snippet"]["topLevelComment"]["snippet"]
+                comment_id = item["id"]
                 all_comments.append({
                     "comment":     tl.get("textOriginal") or tl.get("textDisplay", ""),
                     "author":      tl.get("authorDisplayName", ""),
                     "publishedAt": tl.get("publishedAt", ""),
                     "likeCount":   tl.get("likeCount", 0),
-                    "replyCount":  reply_count,
+                    "replyCount":  item["snippet"].get("totalReplyCount", 0),
                     "videoUrl":    video_url,
                     "commentUrl":  f"{video_url}&lc={comment_id}",
                 })
@@ -286,16 +344,14 @@ def fetch_tiktok_comments(handle, max_items, run_id):
     """
     clockworks/tiktok-comments-scraper.
     Input: profile handle → actor discovers recent videos automatically.
-    commentsPerPost capped at 500 to spread collection across more uploads.
-    maxRepliesPerComment set to 10 — replies are not tagged but captured for thread context.
     """
     handle = handle.lstrip("@")
     actor_input = {
-        "profiles":                [handle],  # username without @ — actor finds recent videos
-        "profileSorting":          "latest",  # most recent posts first
-        "resultsPerPage":          30,        # number of videos to scrape per profile
-        "topLevelCommentsPerPost": 500,       # max top-level comments per video; spreads collection across 30 videos
-        "maxRepliesPerComment":    10,        # reply cap per comment (not tagged; thread context only)
+        "profiles":             [handle],
+        "profileSorting":       "latest",
+        "commentsPerPost":      max_items,
+        "postsPerProfile":      30,
+        "maxRepliesPerComment": 20,
     }
 
     try:
@@ -306,8 +362,7 @@ def fetch_tiktok_comments(handle, max_items, run_id):
         log(run_id, f"TikTok: failed to start Apify run — {e}")
         return []
 
-    success = wait_for_apify_run(apify_run_id, run_id)
-    if not success:
+    if not wait_for_apify_run(apify_run_id, run_id):
         log(run_id, "TikTok: Apify run failed")
         return []
 
@@ -318,269 +373,11 @@ def fetch_tiktok_comments(handle, max_items, run_id):
 
 
 # ──────────────────────────────────────────────────────────────
-# Notion — Comment Dataset
+# Tagging — in memory
 # ──────────────────────────────────────────────────────────────
-
-def create_comment_database(brand_page_id, brand_name, subject_tags, run_id):
-    today           = date.today().strftime("%Y-%m-%d")
-    subject_options = [{"name": t} for t in subject_tags if t]
-
-    payload = {
-        "parent": {"page_id": brand_page_id},
-        "title":  [{"text": {"content": f"Comment Dataset — {brand_name} — {today}"}}],
-        "properties": {
-            "Comment":           {"title": {}},
-            "Platform":          {"select": {"options": [{"name": "YouTube"}, {"name": "TikTok"}]}},
-            "Source URL":        {"url": {}},
-            "Item URL":          {"url": {}},
-            "Published Date":    {"rich_text": {}},
-            "Author":            {"rich_text": {}},
-            "Reply Count":       {"number": {}},
-            "Like Count":        {"number": {}},
-            "Has Replies":       {"checkbox": {}},
-            "Is Reply":          {"checkbox": {}},
-            "Reply To":          {"rich_text": {}},
-            "Parent Comment ID": {"rich_text": {}},
-            "Item Title":        {"rich_text": {}},
-            "Motivation Tag":    {"select": {"options": [{"name": t} for t in MOTIVATION_TAGS]}},
-            "Sentiment Tag":     {"select": {"options": [{"name": t} for t in SENTIMENT_TAGS]}},
-            "Subject Tag":       {"multi_select": {"options": subject_options}},
-            "Untaggable":        {"checkbox": {}},
-            "Note":              {"rich_text": {}},
-        },
-    }
-
-    r = requests.post(
-        "https://api.notion.com/v1/databases",
-        headers=notion_headers(),
-        json=payload,
-        timeout=30,
-    )
-    r.raise_for_status()
-    db_id  = r.json()["id"]
-    db_url = r.json()["url"]
-    log(run_id, f"Comment Dataset created: {db_url}")
-    return db_id, db_url
-
-
-def write_comment_row(database_id, item, platform_label):
-    text = (
-        item.get("comment") or item.get("text") or item.get("body") or
-        item.get("content") or item.get("review") or ""
-    )
-    text = str(text)[:2000]
-
-    reply_count = safe_int(item.get("replyCommentTotal") or item.get("replyCount") or item.get("repliesCount")) or 0
-    is_reply    = bool(item.get("repliesToId") or item.get("parentId") or
-                       item.get("isReply") or
-                       str(item.get("type", "")).lower() == "reply")
-    reply_to    = str(item.get("replyTo") or item.get("replyUsername") or "")
-
-    props = {
-        "Comment":     {"title": [{"text": {"content": text}}]},
-        "Platform":    {"select": {"name": platform_label}},
-        "Has Replies": {"checkbox": reply_count > 0},
-        "Is Reply":    {"checkbox": is_reply},
-    }
-
-    if reply_to:
-        props["Reply To"] = {"rich_text": [{"text": {"content": reply_to[:200]}}]}
-
-    parent_id = str(item.get("repliesToId") or item.get("parentCommentId") or "")
-    if parent_id:
-        props["Parent Comment ID"] = {"rich_text": [{"text": {"content": parent_id[:200]}}]}
-
-    source_url = safe_url(
-        item.get("videoWebUrl") or item.get("pageUrl") or item.get("url") or
-        item.get("videoUrl") or item.get("sourceUrl")
-    )
-    if source_url:
-        props["Source URL"] = {"url": source_url}
-
-    item_url = safe_url(item.get("commentUrl") or item.get("itemUrl") or item.get("replyUrl"))
-    if item_url:
-        props["Item URL"] = {"url": item_url}
-
-    pub = str(
-        item.get("createTimeISO") or item.get("publishedTimeText") or item.get("date") or
-        item.get("publishedAt") or item.get("at") or ""
-    )
-    if pub:
-        props["Published Date"] = {"rich_text": [{"text": {"content": pub[:100]}}]}
-
-    author = str(
-        item.get("author") or item.get("authorText") or
-        item.get("uniqueId") or item.get("userName") or item.get("user") or ""
-    )
-    if author:
-        props["Author"] = {"rich_text": [{"text": {"content": author[:200]}}]}
-
-    if reply_count:
-        props["Reply Count"] = {"number": reply_count}
-
-    lc = safe_int(
-        item.get("diggCount") or item.get("likeCount") or item.get("voteCount") or
-        item.get("likes") or item.get("thumbsUpCount") or item.get("helpfulCount")
-    )
-    if lc is not None:
-        props["Like Count"] = {"number": lc}
-
-    title = str(item.get("videoTitle") or item.get("title") or "")
-    if title:
-        props["Item Title"] = {"rich_text": [{"text": {"content": title[:200]}}]}
-
-    r = requests.post(
-        "https://api.notion.com/v1/pages",
-        headers=notion_headers(),
-        json={"parent": {"database_id": database_id}, "properties": props},
-        timeout=30,
-    )
-    return r.status_code == 200, (r.json().get("id") if r.status_code == 200 else None)
-
-
-# ──────────────────────────────────────────────────────────────
-# Notion — Authors database
-# ──────────────────────────────────────────────────────────────
-
-def create_author_database(brand_page_id, brand_name, run_id):
-    today = date.today().strftime("%Y-%m-%d")
-    payload = {
-        "parent": {"page_id": brand_page_id},
-        "title":  [{"text": {"content": f"Authors — {brand_name} — {today}"}}],
-        "properties": {
-            "Author":           {"title": {}},
-            "Platform":         {"rich_text": {}},
-            "Comment Count":    {"number": {}},
-            "Like Count Total": {"number": {}},
-        },
-    }
-    r = requests.post(
-        "https://api.notion.com/v1/databases",
-        headers=notion_headers(),
-        json=payload,
-        timeout=30,
-    )
-    r.raise_for_status()
-    db_id  = r.json()["id"]
-    db_url = r.json()["url"]
-    log(run_id, f"Authors database created: {db_url}")
-    return db_id, db_url
-
-
-def build_author_database(comment_db_id, author_db_id, run_id):
-    log(run_id, "Building Authors database")
-
-    rows, cursor = [], None
-    while True:
-        payload = {"page_size": 100}
-        if cursor:
-            payload["start_cursor"] = cursor
-        r = requests.post(
-            f"https://api.notion.com/v1/databases/{comment_db_id}/query",
-            headers=notion_headers(),
-            json=payload,
-            timeout=30,
-        )
-        r.raise_for_status()
-        data = r.json()
-        rows.extend(data.get("results", []))
-        if not data.get("has_more"):
-            break
-        cursor = data.get("next_cursor")
-
-    author_map = {}
-    for row in rows:
-        props    = row.get("properties", {})
-        author   = ""
-        platform = ""
-        likes    = 0
-
-        author_prop = props.get("Author", {}).get("rich_text", [])
-        if author_prop:
-            author = author_prop[0].get("plain_text", "")
-
-        platform_prop = props.get("Platform", {}).get("select")
-        if platform_prop:
-            platform = platform_prop.get("name", "")
-
-        like_prop = props.get("Like Count", {}).get("number")
-        if like_prop:
-            likes = like_prop
-
-        if not author:
-            continue
-
-        key = (author, platform)
-        if key not in author_map:
-            author_map[key] = {"comment_count": 0, "like_total": 0}
-        author_map[key]["comment_count"] += 1
-        author_map[key]["like_total"]    += likes
-
-    log(run_id, f"Authors: {len(author_map)} unique author/platform pairs")
-
-    sorted_authors = sorted(
-        author_map.items(), key=lambda x: x[1]["comment_count"], reverse=True
-    )
-    written = 0
-    for (author, platform), stats in sorted_authors:
-        props = {
-            "Author":           {"title": [{"text": {"content": author[:200]}}]},
-            "Platform":         {"rich_text": [{"text": {"content": platform}}]},
-            "Comment Count":    {"number": stats["comment_count"]},
-            "Like Count Total": {"number": stats["like_total"]},
-        }
-        r = requests.post(
-            "https://api.notion.com/v1/pages",
-            headers=notion_headers(),
-            json={"parent": {"database_id": author_db_id}, "properties": props},
-            timeout=30,
-        )
-        if r.status_code == 200:
-            written += 1
-        time.sleep(0.34)
-
-    log(run_id, f"Authors: {written} rows written")
-
-
-# ──────────────────────────────────────────────────────────────
-# Tagging — runs immediately after each platform completes
-# ──────────────────────────────────────────────────────────────
-
-def fetch_untagged_rows(database_id):
-    rows, cursor = [], None
-    while True:
-        payload = {
-            "filter": {
-                "and": [
-                    {"property": "Motivation Tag", "select": {"is_empty": True}},
-                    {"property": "Is Reply",       "checkbox": {"equals": False}},
-                ]
-            },
-            "page_size": 100,
-        }
-        if cursor:
-            payload["start_cursor"] = cursor
-        r = requests.post(
-            f"https://api.notion.com/v1/databases/{database_id}/query",
-            headers=notion_headers(),
-            json=payload,
-            timeout=30,
-        )
-        r.raise_for_status()
-        data = r.json()
-        rows.extend(data.get("results", []))
-        if not data.get("has_more"):
-            break
-        cursor = data.get("next_cursor")
-    return rows
-
-
-def extract_text(row):
-    title = row.get("properties", {}).get("Comment", {}).get("title", [])
-    return title[0].get("plain_text", "") if title else ""
-
 
 def tag_batch(comments, subject_tags):
+    """Send a batch to Claude Haiku for tagging. Returns list of tag dicts."""
     client   = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     numbered = "\n".join(
         f"{i+1}. [ID:{c['id']}] {c['text'][:400]}"
@@ -624,68 +421,37 @@ Format: [{{"id": "page-id", "motivation_tag": "Praise", "sentiment_tag": "Positi
     return json.loads(raw.strip())
 
 
-def update_row_tags(page_id, motivation_tag, sentiment_tag, subject_tags, untaggable=False):
-    props = {"Untaggable": {"checkbox": untaggable}}
-    if not untaggable:
-        props["Motivation Tag"] = {"select": {"name": motivation_tag}}
-        props["Sentiment Tag"]  = {"select": {"name": sentiment_tag}}
-        props["Subject Tag"]    = {"multi_select": [{"name": t} for t in subject_tags[:2] if t]}
-    for attempt in range(3):
-        try:
-            r = requests.patch(
-                f"https://api.notion.com/v1/pages/{page_id}",
-                headers=notion_headers(),
-                json={"properties": props},
-                timeout=30,
-            )
-            return r.status_code == 200
-        except requests.Timeout:
-            if attempt < 2:
-                time.sleep(2 ** attempt)  # 1s then 2s
-            else:
-                return False
-    return False
-
-
-def tag_platform_rows(db_id, subject_tags, run_id):
-    """Fetch all untagged rows and tag them. Called after each platform writes."""
-    rows = fetch_untagged_rows(db_id)
-    if not rows:
-        return 0
-
-    log(run_id, f"Tagging {len(rows)} rows")
+def tag_comments_in_memory(all_comments, subject_tags, run_id):
+    """Tag all comments in memory. Mutates each dict in all_comments in place."""
     tagged = 0
-
-    for i in range(0, len(rows), BATCH_SIZE):
-        batch    = rows[i: i + BATCH_SIZE]
-        comments = [
-            {"id": r["id"], "text": extract_text(r)}
-            for r in batch if extract_text(r)
+    for i in range(0, len(all_comments), BATCH_SIZE):
+        batch       = all_comments[i:i + BATCH_SIZE]
+        batch_input = [
+            {"id": str(i + j), "text": c["comment"][:400]}
+            for j, c in enumerate(batch)
+            if c.get("comment")
         ]
-        if not comments:
+        if not batch_input:
             continue
 
         try:
-            results = tag_batch(comments, subject_tags)
-            tag_map = {t["id"]: t for t in results}
+            results = tag_batch(batch_input, subject_tags)
+            tag_map = {r["id"]: r for r in results}
 
-            for comment in comments:
-                tag = tag_map.get(comment["id"])
+            for j in range(len(batch)):
+                tag = tag_map.get(str(i + j))
                 if not tag:
                     continue
-                is_untaggable = tag.get("motivation_tag") == "Untaggable"
-                ok = update_row_tags(
-                    comment["id"],
-                    tag.get("motivation_tag", ""),
-                    tag.get("sentiment_tag", ""),
-                    tag.get("subject_tags", []),
-                    untaggable=is_untaggable,
-                )
-                if ok:
-                    tagged += 1
-                time.sleep(0.34)
+                is_untaggable          = tag.get("motivation_tag") == "Untaggable"
+                batch[j]["untaggable"]     = is_untaggable
+                batch[j]["motivation_tag"] = "" if is_untaggable else tag.get("motivation_tag", "")
+                batch[j]["sentiment_tag"]  = "" if is_untaggable else tag.get("sentiment_tag", "")
+                # Pipe-separated for CSV compatibility
+                batch[j]["subject_tags"]   = "" if is_untaggable else "|".join(tag.get("subject_tags", []))
+                tagged += 1
 
-            log(run_id, f"Tagged {tagged} / {len(rows)} rows")
+            update_run(run_id, items_tagged=tagged)
+            log(run_id, f"Tagged {tagged} / {len(all_comments)}")
             time.sleep(1)
 
         except Exception as e:
@@ -695,27 +461,33 @@ def tag_platform_rows(db_id, subject_tags, run_id):
 
 
 # ──────────────────────────────────────────────────────────────
+# CSV generation
+# ──────────────────────────────────────────────────────────────
+
+def generate_csv(comments):
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for c in comments:
+        writer.writerow(c)
+    return output.getvalue()
+
+
+# ──────────────────────────────────────────────────────────────
 # Pipeline
 # ──────────────────────────────────────────────────────────────
 
 def run_pipeline(run_id, form_data):
     try:
         brand_name   = form_data["brand_name"]
-        page_id      = form_data["notion_page_id"].replace("-", "")
         platforms    = form_data.get("platforms", [])
         subject_tags = [t.strip() for t in form_data.get("subject_tags", "").split(",") if t.strip()]
-
-        youtube_max = int(form_data.get("youtube_max_comments", 5000))
-        tiktok_max  = int(form_data.get("tiktok_max_comments", 1000))
+        youtube_max  = int(form_data.get("youtube_max_comments", 5000))
+        tiktok_max   = int(form_data.get("tiktok_max_comments", 1000))
 
         log(run_id, f"Pipeline started — {brand_name} | platforms: {platforms}")
 
-        update_run(run_id, phase="Creating Notion database")
-        db_id, db_url = create_comment_database(page_id, brand_name, subject_tags, run_id)
-        update_run(run_id, database_url=db_url)
-
-        total_written = 0
-        total_tagged  = 0
+        all_comments = []
 
         # ── YouTube ──
         if "youtube" in platforms:
@@ -724,23 +496,11 @@ def run_pipeline(run_id, form_data):
                 log(run_id, "YouTube: no handle provided — skipping")
             else:
                 update_run(run_id, phase="Scraping YouTube")
-                items   = fetch_youtube_comments(handle, youtube_max, run_id)
-                written = 0
+                items = fetch_youtube_comments(handle, youtube_max, run_id)
                 for item in items:
-                    ok, _ = write_comment_row(db_id, item, "YouTube")
-                    if ok:
-                        written += 1
-                    update_run(run_id, items_written=total_written + written)
-                    if written % 100 == 0 and written > 0:
-                        log(run_id, f"YouTube: {written} rows written…")
-                    time.sleep(0.34)
-                total_written += written
-                log(run_id, f"YouTube: {written} rows written")
-
-                update_run(run_id, phase="Tagging YouTube comments")
-                tagged        = tag_platform_rows(db_id, subject_tags, run_id)
-                total_tagged += tagged
-                update_run(run_id, items_tagged=total_tagged)
+                    all_comments.append(normalize_comment(item, "YouTube"))
+                update_run(run_id, items_written=len(all_comments))
+                log(run_id, f"YouTube: {len(items)} comments normalised")
 
         # ── TikTok ──
         if "tiktok" in platforms:
@@ -749,38 +509,31 @@ def run_pipeline(run_id, form_data):
                 log(run_id, "TikTok: no handle provided — skipping")
             else:
                 update_run(run_id, phase="Scraping TikTok")
-                items   = fetch_tiktok_comments(handle, tiktok_max, run_id)
-                written = 0
+                items = fetch_tiktok_comments(handle, tiktok_max, run_id)
                 for item in items:
-                    ok, _ = write_comment_row(db_id, item, "TikTok")
-                    if ok:
-                        written += 1
-                    update_run(run_id, items_written=total_written + written)
-                    if written % 100 == 0 and written > 0:
-                        log(run_id, f"TikTok: {written} rows written…")
-                    time.sleep(0.34)
-                total_written += written
-                log(run_id, f"TikTok: {written} rows written")
+                    all_comments.append(normalize_comment(item, "TikTok"))
+                update_run(run_id, items_written=len(all_comments))
+                log(run_id, f"TikTok: {len(items)} comments normalised")
 
-                update_run(run_id, phase="Tagging TikTok comments")
-                tagged        = tag_platform_rows(db_id, subject_tags, run_id)
-                total_tagged += tagged
-                update_run(run_id, items_tagged=total_tagged)
+        log(run_id, f"Collection complete — {len(all_comments)} comments")
 
-        log(run_id, f"Collection complete — {total_written} rows, {total_tagged} tagged")
+        # ── Tag all in memory ──
+        update_run(run_id, phase="Tagging")
+        tag_comments_in_memory(all_comments, subject_tags, run_id)
 
-        # ── Authors database ──
-        if total_written > 0:
-            update_run(run_id, phase="Building Authors database")
-            author_db_id, _ = create_author_database(page_id, brand_name, run_id)
-            build_author_database(db_id, author_db_id, run_id)
+        # ── Generate CSV ──
+        update_run(run_id, phase="Generating CSV")
+        slug     = "".join(c if c.isalnum() or c == "-" else "-" for c in brand_name.lower().replace(" ", "-"))
+        filename = f"{slug}-signal-audit-{date.today()}.csv"
+        runs[run_id]["csv_data"]     = generate_csv(all_comments)
+        runs[run_id]["csv_filename"] = filename
 
         update_run(run_id,
             status="complete",
             phase="Done",
             completed_at=datetime.now().isoformat(),
         )
-        log(run_id, "Pipeline complete. Open Claude Chat for analysis.")
+        log(run_id, f"Complete — {len(all_comments)} comments. CSV ready.")
 
     except Exception as e:
         log(run_id, f"Pipeline error: {e}")
@@ -795,6 +548,7 @@ def run_pipeline(run_id, form_data):
 def index():
     return send_from_directory("templates", "index.html")
 
+
 @app.route("/run", methods=["POST"])
 def start_run():
     data   = request.json
@@ -802,26 +556,41 @@ def start_run():
     runs[run_id] = {
         "status":        "running",
         "phase":         "Starting",
-        "items_written":  0,
-        "items_tagged":   0,
-        "database_url":   None,
-        "error":          None,
-        "log":            [],
-        "started_at":     datetime.now().isoformat(),
-        "completed_at":   None,
+        "items_written": 0,
+        "items_tagged":  0,
+        "csv_data":      None,
+        "csv_filename":  None,
+        "error":         None,
+        "log":           [],
+        "started_at":    datetime.now().isoformat(),
+        "completed_at":  None,
     }
     threading.Thread(target=run_pipeline, args=(run_id, data), daemon=True).start()
     return jsonify({"run_id": run_id})
+
 
 @app.route("/status/<run_id>")
 def get_status(run_id):
     run = runs.get(run_id)
     if not run:
         return jsonify({"error": "Run not found"}), 404
-    return jsonify(run)
+    # Strip csv_data — can be large, not needed for status polling
+    return jsonify({k: v for k, v in run.items() if k != "csv_data"})
+
+
+@app.route("/download/<run_id>")
+def download_csv(run_id):
+    run = runs.get(run_id)
+    if not run or not run.get("csv_data"):
+        return jsonify({"error": "CSV not ready or run not found"}), 404
+    response = make_response(run["csv_data"])
+    response.headers["Content-Type"]        = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = f'attachment; filename="{run["csv_filename"]}"'
+    return response
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    print(f"\nVillage Hall Signal Audit Tool")
+    print(f"\nVillage Hall Signal Audit Tool — CSV mode")
     print(f"Open http://localhost:{port} in your browser\n")
     app.run(debug=False, host="0.0.0.0", port=port)
