@@ -2,6 +2,7 @@
 app.py — The Village Hall Signal Audit Tool
 Platforms: YouTube (Data API v3) · TikTok (Apify clockworks/tiktok-comments-scraper)
 Output: CSV download (Notion dependency removed)
+Modes: pilot (untagged sample, ~150/platform) · full (tagged, full volume)
 """
 
 import csv
@@ -26,8 +27,9 @@ APIFY_API_KEY     = os.getenv("APIFY_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 YOUTUBE_API_KEY   = os.getenv("YOUTUBE_API_KEY", "")
 
-BATCH_SIZE       = 40
-YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3"
+BATCH_SIZE        = 40
+PILOT_SAMPLE_SIZE = 150   # comments per platform in pilot mode
+YOUTUBE_API_BASE  = "https://www.googleapis.com/youtube/v3"
 
 # Six-tag motivation system (canonical — see Signal Scoring Framework doc)
 MOTIVATION_TAGS = ["Praise", "Criticism", "Question", "Suggestion", "Comparison", "Sharing"]
@@ -38,7 +40,7 @@ MOTIVATION_DEFINITIONS = """
 - Question: seeking information or clarification ("how do I", "what temperature", "does this work for")
 - Suggestion: directive or prescriptive ("you should do X", "please add Y", "it would be better if")
 - Comparison: placing the brand alongside another ("reminds me of", "better than", "similar to", "the X version of Y")
-- Sharing: active peer referral — tagging others to see this ("@name you need to see this", "sending this to everyone")
+- Sharing: active peer referral — explicitly tagging or directing another person to the content ("@name you need to see this", "sending this to my friend"). Note: expressions of personal intent or enthusiasm ("I'm making this tonight", "adding to my list", "Making this Wednesday", "just tried this") are Praise, not Sharing.
 """.strip()
 
 SENTIMENT_TAGS = ["Positive", "Negative", "Neutral", "Mixed"]
@@ -92,35 +94,66 @@ def parse_youtube_handle(raw):
     return s.lstrip("@")
 
 
+def parse_subject_tags(raw):
+    """Parse comma-separated subject tags with optional inline definitions.
+
+    Supports two formats:
+      "Recipes, Slow living, Growing"
+      "Recipes — technique and ingredients, Slow living — intentional lifestyle and pace"
+
+    Returns a list of {"name": str, "definition": str} dicts.
+    """
+    items = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        # Accept both em dash ( — ) and plain hyphen surrounded by spaces ( - )
+        for sep in [" \u2014 ", " - "]:
+            if sep in part:
+                name, defn = part.split(sep, 1)
+                items.append({"name": name.strip(), "definition": defn.strip()})
+                break
+        else:
+            items.append({"name": part, "definition": ""})
+    return items
+
+
 def normalize_comment(item, platform):
-    """Normalise a raw Apify / YouTube comment dict into a consistent flat structure."""
+    """Flatten a raw Apify / YouTube comment dict into the standard CSV row structure."""
     text = (
         item.get("comment") or item.get("text") or item.get("body") or
         item.get("content") or ""
     )
     text = str(text)[:2000]
 
+    # TikTok uses uniqueId; YouTube uses authorDisplayName captured as author
     author = str(
         item.get("author") or item.get("authorText") or
-        item.get("userName") or item.get("user") or ""
+        item.get("uniqueId") or item.get("userName") or item.get("user") or ""
     )[:200]
 
+    # TikTok uses createTimeISO; YouTube uses publishedAt
     pub = str(
-        item.get("publishedAt") or item.get("publishedTimeText") or
-        item.get("date") or item.get("at") or ""
+        item.get("createTimeISO") or item.get("publishedAt") or
+        item.get("publishedTimeText") or item.get("date") or item.get("at") or ""
     )[:100]
 
+    # TikTok uses diggCount for likes
     like_count = safe_int(
-        item.get("likeCount") or item.get("voteCount") or
+        item.get("diggCount") or item.get("likeCount") or item.get("voteCount") or
         item.get("likes") or item.get("thumbsUpCount") or 0
     ) or 0
 
+    # TikTok uses replyCommentTotal
     reply_count = safe_int(
-        item.get("replyCount") or item.get("repliesCount") or 0
+        item.get("replyCommentTotal") or item.get("replyCount") or
+        item.get("repliesCount") or 0
     ) or 0
 
+    # TikTok uses videoWebUrl
     source_url = safe_url(
-        item.get("pageUrl") or item.get("url") or
+        item.get("videoWebUrl") or item.get("pageUrl") or item.get("url") or
         item.get("videoUrl") or item.get("sourceUrl") or ""
     ) or ""
 
@@ -188,7 +221,7 @@ def fetch_youtube_comments(channel_input, max_items, run_id):
     # 2. Get recent video IDs from uploads playlist (already newest-first)
     video_ids     = []
     next_page     = None
-    target_videos = max(20, max_items // 100)
+    target_videos = max(5, max_items // 100)
 
     while len(video_ids) < target_videos:
         params = {
@@ -340,19 +373,32 @@ def is_top_level(item):
     return True
 
 
-def fetch_tiktok_comments(handle, max_items, run_id):
+def fetch_tiktok_comments(handle, max_items, run_id, pilot=False):
     """
     clockworks/tiktok-comments-scraper.
     Input: profile handle → actor discovers recent videos automatically.
+    topLevelCommentsPerPost capped at 500 to spread collection across multiple uploads.
+    In pilot mode: fewer videos and comments per video for a fast representative sample.
     """
     handle = handle.lstrip("@")
-    actor_input = {
-        "profiles":             [handle],
-        "profileSorting":       "latest",
-        "commentsPerPost":      max_items,
-        "postsPerProfile":      30,
-        "maxRepliesPerComment": 20,
-    }
+
+    if pilot:
+        # Fast sample: 5 videos × 50 comments = 250 max, trimmed to PILOT_SAMPLE_SIZE
+        actor_input = {
+            "profiles":                [handle],
+            "profileSorting":          "latest",
+            "resultsPerPage":          5,
+            "topLevelCommentsPerPost": 50,
+            "maxRepliesPerComment":    0,   # no replies in pilot
+        }
+    else:
+        actor_input = {
+            "profiles":                [handle],
+            "profileSorting":          "latest",
+            "resultsPerPage":          30,
+            "topLevelCommentsPerPost": 500,
+            "maxRepliesPerComment":    10,
+        }
 
     try:
         apify_run_id, dataset_id = create_apify_run(
@@ -376,31 +422,57 @@ def fetch_tiktok_comments(handle, max_items, run_id):
 # Tagging — in memory
 # ──────────────────────────────────────────────────────────────
 
-def tag_batch(comments, subject_tags):
+def build_subject_tags_prompt_section(subject_tag_items):
+    """Format subject tags for the tagging prompt.
+    If any item has a definition, use a bulleted list with definitions.
+    Otherwise use a flat comma-separated list.
+    """
+    has_definitions = any(item.get("definition") for item in subject_tag_items)
+    if has_definitions:
+        lines = []
+        for item in subject_tag_items:
+            if item.get("definition"):
+                lines.append(f"- {item['name']}: {item['definition']}")
+            else:
+                lines.append(f"- {item['name']}")
+        return "\n".join(lines)
+    else:
+        return ", ".join(item["name"] for item in subject_tag_items)
+
+
+def tag_batch(comments, subject_tag_items):
     """Send a batch to Claude Haiku for tagging. Returns list of tag dicts."""
     client   = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     numbered = "\n".join(
         f"{i+1}. [ID:{c['id']}] {c['text'][:400]}"
         for i, c in enumerate(comments)
     )
+    subject_names   = [item["name"] for item in subject_tag_items]
+    tags_section    = build_subject_tags_prompt_section(subject_tag_items)
+
     prompt = f"""Tag every comment with one MOTIVATION tag, one SENTIMENT tag, and 1–2 SUBJECT tags.
 
-MOTIVATION tags (pick exactly one):
+MOTIVATION tags — pick exactly one from this list only:
 {', '.join(MOTIVATION_TAGS)}
+
+Do not use sentiment words (Positive, Negative, Mixed) as motivation tags.
 
 Definitions:
 {MOTIVATION_DEFINITIONS}
 
-SENTIMENT tags (pick exactly one): Positive, Negative, Neutral, Mixed
+SENTIMENT tags — pick exactly one: Positive, Negative, Neutral, Mixed
 
-SUBJECT tags (pick 1–2 from this list only):
-{', '.join(subject_tags)}
+SUBJECT tags — pick 1–2 from this list only:
+{tags_section}
 
 Rules:
-- motivation_tag: single tag, dominant motivation only
+- motivation_tag: single tag from the valid motivation list above, dominant motivation only
 - sentiment_tag: single tag
-- subject_tags: array of 1–2; use nearest match if no exact fit
-- If a comment cannot be meaningfully tagged, set motivation_tag and sentiment_tag to "Untaggable" and subject_tags to []
+- subject_tags: array of 1–2 from the provided subject list; assign based on what the comment is directly and primarily about, not merely the video it appears on
+- Untaggable: use ONLY for comments that are genuinely unintelligible — garbled text, single characters, non-language emoji strings, or languages where meaning cannot be inferred. Short but clear comments ("Love this", "This is my dream life", "I missed you", "Can I move there") are taggable — do not mark them untaggable.
+- If a comment is Untaggable, set motivation_tag and sentiment_tag to "Untaggable" and subject_tags to []
+
+Valid subject tag names (use exact spelling): {', '.join(subject_names)}
 
 Comments:
 {numbered}
@@ -421,7 +493,7 @@ Format: [{{"id": "page-id", "motivation_tag": "Praise", "sentiment_tag": "Positi
     return json.loads(raw.strip())
 
 
-def tag_comments_in_memory(all_comments, subject_tags, run_id):
+def tag_comments_in_memory(all_comments, subject_tag_items, run_id):
     """Tag all comments in memory. Mutates each dict in all_comments in place."""
     tagged = 0
     for i in range(0, len(all_comments), BATCH_SIZE):
@@ -435,14 +507,14 @@ def tag_comments_in_memory(all_comments, subject_tags, run_id):
             continue
 
         try:
-            results = tag_batch(batch_input, subject_tags)
+            results = tag_batch(batch_input, subject_tag_items)
             tag_map = {r["id"]: r for r in results}
 
             for j in range(len(batch)):
                 tag = tag_map.get(str(i + j))
                 if not tag:
                     continue
-                is_untaggable          = tag.get("motivation_tag") == "Untaggable"
+                is_untaggable              = tag.get("motivation_tag") == "Untaggable"
                 batch[j]["untaggable"]     = is_untaggable
                 batch[j]["motivation_tag"] = "" if is_untaggable else tag.get("motivation_tag", "")
                 batch[j]["sentiment_tag"]  = "" if is_untaggable else tag.get("sentiment_tag", "")
@@ -479,13 +551,24 @@ def generate_csv(comments):
 
 def run_pipeline(run_id, form_data):
     try:
-        brand_name   = form_data["brand_name"]
-        platforms    = form_data.get("platforms", [])
-        subject_tags = [t.strip() for t in form_data.get("subject_tags", "").split(",") if t.strip()]
-        youtube_max  = int(form_data.get("youtube_max_comments", 5000))
-        tiktok_max   = int(form_data.get("tiktok_max_comments", 1000))
+        brand_name = form_data["brand_name"]
+        platforms  = form_data.get("platforms", [])
+        mode       = form_data.get("mode", "full")   # "pilot" or "full"
+        is_pilot   = mode == "pilot"
 
-        log(run_id, f"Pipeline started — {brand_name} | platforms: {platforms}")
+        # Parse subject tags (names + optional definitions)
+        subject_tag_items = parse_subject_tags(form_data.get("subject_tags", ""))
+        subject_tags      = [item["name"] for item in subject_tag_items]
+
+        youtube_max = int(form_data.get("youtube_max_comments", 5000))
+        tiktok_max  = int(form_data.get("tiktok_max_comments", 1000))
+
+        if is_pilot:
+            youtube_max = min(youtube_max, PILOT_SAMPLE_SIZE)
+            tiktok_max  = min(tiktok_max, PILOT_SAMPLE_SIZE)
+            log(run_id, f"Pilot mode — collecting up to {PILOT_SAMPLE_SIZE} comments per platform, untagged")
+        else:
+            log(run_id, f"Full run — {brand_name} | platforms: {platforms}")
 
         all_comments = []
 
@@ -509,7 +592,7 @@ def run_pipeline(run_id, form_data):
                 log(run_id, "TikTok: no handle provided — skipping")
             else:
                 update_run(run_id, phase="Scraping TikTok")
-                items = fetch_tiktok_comments(handle, tiktok_max, run_id)
+                items = fetch_tiktok_comments(handle, tiktok_max, run_id, pilot=is_pilot)
                 for item in items:
                     all_comments.append(normalize_comment(item, "TikTok"))
                 update_run(run_id, items_written=len(all_comments))
@@ -517,14 +600,20 @@ def run_pipeline(run_id, form_data):
 
         log(run_id, f"Collection complete — {len(all_comments)} comments")
 
-        # ── Tag all in memory ──
-        update_run(run_id, phase="Tagging")
-        tag_comments_in_memory(all_comments, subject_tags, run_id)
+        # ── Tagging (skipped in pilot mode) ──
+        if not is_pilot and subject_tags:
+            update_run(run_id, phase="Tagging")
+            tag_comments_in_memory(all_comments, subject_tag_items, run_id)
+        elif is_pilot:
+            log(run_id, "Pilot: tagging skipped — open Claude Chat to review sample and confirm subject tags")
+        else:
+            log(run_id, "No subject tags provided — skipping tagging")
 
         # ── Generate CSV ──
         update_run(run_id, phase="Generating CSV")
         slug     = "".join(c if c.isalnum() or c == "-" else "-" for c in brand_name.lower().replace(" ", "-"))
-        filename = f"{slug}-signal-audit-{date.today()}.csv"
+        suffix   = "pilot" if is_pilot else "signal-audit"
+        filename = f"{slug}-{suffix}-{date.today()}.csv"
         runs[run_id]["csv_data"]     = generate_csv(all_comments)
         runs[run_id]["csv_filename"] = filename
 
@@ -533,7 +622,11 @@ def run_pipeline(run_id, form_data):
             phase="Done",
             completed_at=datetime.now().isoformat(),
         )
-        log(run_id, f"Complete — {len(all_comments)} comments. CSV ready.")
+
+        if is_pilot:
+            log(run_id, f"Pilot complete — {len(all_comments)} comments. Paste CSV into Claude Chat to confirm subject tags, then run full audit.")
+        else:
+            log(run_id, f"Complete — {len(all_comments)} comments tagged. CSV ready.")
 
     except Exception as e:
         log(run_id, f"Pipeline error: {e}")
@@ -556,6 +649,7 @@ def start_run():
     runs[run_id] = {
         "status":        "running",
         "phase":         "Starting",
+        "mode":          data.get("mode", "full"),
         "items_written": 0,
         "items_tagged":  0,
         "csv_data":      None,
