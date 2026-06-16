@@ -173,6 +173,8 @@ textarea:focus { border-color: var(--hunter); }
 
 textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
 
+.mono { font-family: 'SF Mono', 'Menlo', 'Consolas', monospace; font-size: 11.5px; }
+
 .hint {
   font-size: 10px;
   color: var(--ink-35);
@@ -182,6 +184,33 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
 
 .field { margin-bottom: 18px; }
 .field:last-child { margin-bottom: 0; }
+
+/* ── Mode toggle ─────────────────────────────────── */
+.mode-toggle {
+  display: flex;
+  border: .5px solid var(--border-strong);
+  width: fit-content;
+}
+.mode-btn {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 10px 22px;
+  border: none;
+  cursor: pointer;
+  background: #fff;
+  color: var(--ink-60);
+  transition: background .15s, color .15s;
+}
+.mode-btn + .mode-btn {
+  border-left: .5px solid var(--border-strong);
+}
+.mode-btn.active {
+  background: var(--hunter);
+  color: var(--cream);
+}
 
 /* ── Platform rows ───────────────────────────────── */
 .platform {
@@ -370,21 +399,30 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
 }
 .log-line:last-child { color: rgba(244,239,227,.72); }
 
+.status-note {
+  font-size: 10px;
+  color: rgba(244,239,227,.55);
+  line-height: 1.7;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: .5px solid rgba(244,239,227,.1);
+  display: none;
+}
+
 .download-btn {
   display: none;
-  margin-top: 20px;
-  font-family: 'Inter', sans-serif;
+  margin-top: 18px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: .18em;
+  letter-spacing: .14em;
   text-transform: uppercase;
-  background: var(--cream);
-  color: var(--hunter);
+  color: var(--cream);
   text-decoration: none;
-  padding: 11px 22px;
-  transition: opacity .15s;
+  border-bottom: .5px solid rgba(244,239,227,.28);
+  padding-bottom: 2px;
+  transition: border-color .15s;
 }
-.download-btn:hover { opacity: .85; }
+.download-btn:hover { border-color: var(--cream); }
 
 .error-msg {
   font-size: 11px;
@@ -402,17 +440,16 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
   <aside class="sidebar">
     <p class="wordmark">The Village Hall</p>
     <h1>Signal<br>Audit</h1>
-    <p class="sidebar-desc">
-      Collects comment data from YouTube and TikTok,
-      tags every row via the Claude API, and exports a CSV
-      ready to load into Claude Chat for analysis.
+    <p class="sidebar-desc" id="sidebar-desc">
+      Collects a small untagged comment sample. Paste into Claude Chat
+      to identify subjects and confirm tags, then run the full audit.
     </p>
     <div class="steps">
       <div class="step active" id="step-1">
         <div class="step-num">1</div>
         <div>
           <p class="step-label">Setup</p>
-          <p class="step-sub">Brand, platforms, volumes</p>
+          <p class="step-sub">Brand, mode, platforms</p>
         </div>
       </div>
       <div class="step" id="step-2">
@@ -425,15 +462,15 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
       <div class="step" id="step-3">
         <div class="step-num">3</div>
         <div>
-          <p class="step-label">Tagging</p>
-          <p class="step-sub">Claude API tagging each row</p>
+          <p class="step-label" id="step-3-label">Ready</p>
+          <p class="step-sub" id="step-3-sub">Download pilot CSV</p>
         </div>
       </div>
-      <div class="step" id="step-4">
+      <div class="step" id="step-4" style="display:none">
         <div class="step-num">4</div>
         <div>
           <p class="step-label">Ready</p>
-          <p class="step-sub">Download CSV for analysis</p>
+          <p class="step-sub">Download tagged CSV</p>
         </div>
       </div>
     </div>
@@ -442,13 +479,24 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
   <!-- Form -->
   <main class="main">
 
+    <!-- Mode -->
+    <div class="section">
+      <p class="section-label">Run mode</p>
+      <div class="field">
+        <div class="mode-toggle">
+          <button class="mode-btn active" id="mode-pilot" onclick="setMode('pilot')">Pilot sample</button>
+          <button class="mode-btn" id="mode-full" onclick="setMode('full')">Full run</button>
+        </div>
+        <p class="hint" id="mode-hint">Collects ~150 comments per platform, untagged. Paste into Claude Chat to identify subjects and confirm tags before the full run.</p>
+      </div>
+    </div>
+
     <!-- Brand -->
     <div class="section">
       <p class="section-label">Brand</p>
       <div class="field">
         <label for="brand_name">Brand or creator name</label>
         <input type="text" id="brand_name" placeholder="e.g. Joe Wicks">
-        <p class="hint">Used to name the output CSV file.</p>
       </div>
     </div>
 
@@ -473,7 +521,7 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
             <label for="youtube_max">Comments to collect</label>
             <input type="number" id="youtube_max" value="5000" min="100" step="100"
               oninput="recalc()">
-            <p class="hint">Fetched from most recent videos, newest comments first.</p>
+            <p class="hint">Capped at 150 in pilot mode. Fetched from most recent videos.</p>
           </div>
         </div>
       </div>
@@ -495,7 +543,7 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
             <label for="tiktok_max">Comments to collect</label>
             <input type="number" id="tiktok_max" value="1000" min="100" step="100"
               oninput="recalc()">
-            <p class="hint">Pulled from most recent posts.</p>
+            <p class="hint">Capped at 150 in pilot mode. Pulled from most recent posts.</p>
           </div>
         </div>
       </div>
@@ -523,26 +571,28 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
           <span class="cost-total-val" id="val-total">—</span>
         </div>
         <p class="cost-note">
-          Indicative only. TikTok: ~£0.40 per 1,000 comments ($0.50 per 1,000 — Apify pay-per-comment).
-          Tagging: ~£0.08 per 1,000 comments (Claude Haiku).
-          YouTube Data API scraping has no Apify cost.
+          Indicative only. TikTok: ~£0.40 per 1,000 comments ($0.50/1k — Apify pay-per-comment).
+          Tagging: ~£0.08 per 1,000 comments (Claude Haiku). YouTube Data API has no Apify cost.
         </p>
       </div>
     </div>
 
-    <!-- Subject tags -->
-    <div class="section">
+    <!-- Subject tags (full run only) -->
+    <div class="section" id="tags-section" style="display:none">
       <p class="section-label">Subject tags</p>
       <div class="field">
-        <label for="subject_tags">Confirmed tags from Claude Chat — comma separated</label>
+        <label for="subject_tags">Confirmed tags — comma separated</label>
         <textarea id="subject_tags" rows="3"
-          placeholder="Workouts, Recipes & food, Transformation, Mental health, Motivation & mindset, App & plans"></textarea>
-        <p class="hint">Confirm and lock these in Claude Chat before running.</p>
+          placeholder="Recipes, Slow living, Growing, Animals, Farm life, Seasonal eating, Appearance, Cookbook, Sustainability, City-to-country"></textarea>
+        <p class="hint">
+          Confirm and lock in Claude Chat before running. Optionally add a definition after each tag using a dash:
+          <em>Recipes — technique and ingredients, Slow living — intentional lifestyle and pace</em>
+        </p>
       </div>
     </div>
 
     <button class="submit" id="submit-btn" onclick="startRun()">
-      Run signal audit
+      Run pilot sample
     </button>
 
     <!-- Status -->
@@ -554,9 +604,12 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
         <div class="progress-anim" id="s-anim"></div>
       </div>
       <div class="status-log" id="s-log"></div>
-      <a href="#" id="s-link" class="download-btn">
-        Download comment CSV →
+      <a href="#" id="s-link" class="download-btn" target="_blank">
+        Download pilot CSV →
       </a>
+      <p class="status-note" id="s-note">
+        Paste this CSV into Claude Chat to review the sample and confirm subject tags, then return here to run the full audit.
+      </p>
       <p class="error-msg" id="s-err"></p>
     </div>
 
@@ -565,32 +618,78 @@ textarea { resize: vertical; min-height: 68px; line-height: 1.6; }
 
 <script>
 // ── Cost rates ────────────────────────────────────────────────
-const TIKTOK_PER_1K  = 0.40;  // £ per 1,000 TikTok comments (Apify — $0.50/1k)
-const TAGGING_PER_1K = 0.08;  // £ per 1,000 comments (Haiku)
+const TIKTOK_PER_1K   = 0.40;   // £ per 1,000 TikTok comments (Apify — $0.50/1k)
+const TAGGING_PER_1K  = 0.08;   // £ per 1,000 comments (Haiku)
+const PILOT_SAMPLE    = 150;     // matches app.py PILOT_SAMPLE_SIZE
+
+let currentMode = 'pilot';
+let currentRunId = null;
 
 function fmt(n) {
-  return n > 0 ? '~£' + n.toFixed(2) : '—';
+  return n > 0 ? '~£' + n.toFixed(2) : 'Free';
 }
 
+// ── Mode toggle ───────────────────────────────────────────────
+function setMode(mode) {
+  currentMode = mode;
+
+  document.getElementById('mode-pilot').classList.toggle('active', mode === 'pilot');
+  document.getElementById('mode-full').classList.toggle('active',  mode === 'full');
+
+  const isPilot = mode === 'pilot';
+
+  // Hint text
+  document.getElementById('mode-hint').textContent = isPilot
+    ? 'Collects ~150 comments per platform, untagged. Paste into Claude Chat to identify subjects and confirm tags before the full run.'
+    : 'Full collection with Claude tagging. Subject tags must be confirmed in Claude Chat before running.';
+
+  // Show/hide subject tags
+  document.getElementById('tags-section').style.display = isPilot ? 'none' : 'block';
+
+  // Submit button label
+  document.getElementById('submit-btn').textContent = isPilot ? 'Run pilot sample' : 'Run signal audit';
+
+  // Sidebar description
+  document.getElementById('sidebar-desc').textContent = isPilot
+    ? 'Collects a small untagged comment sample. Paste into Claude Chat to identify subjects and confirm tags, then run the full audit.'
+    : 'Collects and tags comments from YouTube and TikTok. Subject tags must be confirmed in Claude Chat before running.';
+
+  // Sidebar steps: pilot = 3 steps, full = 4 steps
+  if (isPilot) {
+    document.getElementById('step-3-label').textContent = 'Ready';
+    document.getElementById('step-3-sub').textContent   = 'Download pilot CSV';
+    document.getElementById('step-4').style.display     = 'none';
+  } else {
+    document.getElementById('step-3-label').textContent = 'Tagging';
+    document.getElementById('step-3-sub').textContent   = 'Claude API tagging each row';
+    document.getElementById('step-4').style.display     = 'flex';
+  }
+
+  recalc();
+}
+
+// ── Cost estimate ─────────────────────────────────────────────
 function recalc() {
-  const ytOn = document.getElementById('chk-youtube').checked;
-  const ttOn = document.getElementById('chk-tiktok').checked;
+  const ytOn    = document.getElementById('chk-youtube').checked;
+  const ttOn    = document.getElementById('chk-tiktok').checked;
+  const isPilot = currentMode === 'pilot';
 
   const panel = document.getElementById('cost-panel');
   if (!ytOn && !ttOn) { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
 
-  const ytCount  = ytOn ? (parseInt(document.getElementById('youtube_max').value) || 0) : 0;
-  const ttCount  = ttOn ? (parseInt(document.getElementById('tiktok_max').value)  || 0) : 0;
-  const total    = ytCount + ttCount;
+  // In pilot mode, actual collection is capped at PILOT_SAMPLE per platform
+  const ytCount = ytOn ? (isPilot ? PILOT_SAMPLE : (parseInt(document.getElementById('youtube_max').value) || 0)) : 0;
+  const ttCount = ttOn ? (isPilot ? PILOT_SAMPLE : (parseInt(document.getElementById('tiktok_max').value)  || 0)) : 0;
+  const total   = ytCount + ttCount;
 
   const ttCost      = (ttCount / 1000) * TIKTOK_PER_1K;
-  const taggingCost = (total  / 1000) * TAGGING_PER_1K;
+  const taggingCost = isPilot ? 0 : (total / 1000) * TAGGING_PER_1K;
   const grand       = ttCost + taggingCost;
 
   show('cost-yt',  ytOn);
   show('cost-tt',  ttOn);
-  show('cost-tag', total > 0);
+  show('cost-tag', !isPilot && total > 0);
 
   setText('val-tt',    fmt(ttCost));
   setText('val-tag',   fmt(taggingCost));
@@ -623,19 +722,21 @@ async function startRun() {
   const brand  = document.getElementById('brand_name').value.trim();
   const tags   = document.getElementById('subject_tags').value.trim();
   const plats  = ['youtube','tiktok'].filter(p => document.getElementById('chk-'+p).checked);
+  const isPilot = currentMode === 'pilot';
 
   if (!brand)        { alert('Please enter a brand name.'); return; }
   if (!plats.length) { alert('Please select at least one platform.'); return; }
-  if (!tags)         { alert('Please enter the confirmed subject tags.'); return; }
+  if (!isPilot && !tags) { alert('Please enter confirmed subject tags before running a full audit.'); return; }
 
   const payload = {
-    brand_name:            brand,
-    platforms:             plats,
-    subject_tags:          tags,
-    youtube_handle:        document.getElementById('youtube_handle').value.trim(),
-    youtube_max_comments:  parseInt(document.getElementById('youtube_max').value)  || 5000,
-    tiktok_handle:         document.getElementById('tiktok_handle').value.trim(),
-    tiktok_max_comments:   parseInt(document.getElementById('tiktok_max').value)   || 1000,
+    brand_name:           brand,
+    mode:                 currentMode,
+    platforms:            plats,
+    subject_tags:         tags,
+    youtube_handle:       document.getElementById('youtube_handle').value.trim(),
+    youtube_max_comments: parseInt(document.getElementById('youtube_max').value) || 5000,
+    tiktok_handle:        document.getElementById('tiktok_handle').value.trim(),
+    tiktok_max_comments:  parseInt(document.getElementById('tiktok_max').value)  || 1000,
   };
 
   const btn = document.getElementById('submit-btn');
@@ -643,16 +744,17 @@ async function startRun() {
   btn.textContent = 'Running…';
 
   show('status', true, 'block');
-  hide('s-link'); hide('s-err');
+  hide('s-link'); hide('s-err'); hide('s-note');
   show('s-anim', true, 'block');
   setStep(2);
 
-  const res    = await fetch('/run', {
-    method: 'POST',
+  const res           = await fetch('/run', {
+    method:  'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload),
+    body:    JSON.stringify(payload),
   });
   const { run_id } = await res.json();
+  currentRunId = run_id;
   setInterval(() => poll(run_id), 5000);
 }
 
@@ -662,7 +764,9 @@ async function poll(runId) {
 
   setText('s-phase',  d.phase || '—');
   setText('s-counts',
-    `${(d.items_written||0).toLocaleString()} collected · ${(d.items_tagged||0).toLocaleString()} tagged`
+    currentMode === 'pilot'
+      ? `${(d.items_written||0).toLocaleString()} comments collected`
+      : `${(d.items_written||0).toLocaleString()} collected · ${(d.items_tagged||0).toLocaleString()} tagged`
   );
 
   const log = document.getElementById('s-log');
@@ -674,20 +778,27 @@ async function poll(runId) {
   if (d.status === 'complete') {
     hide('s-anim');
     document.getElementById('s-fill').style.width = '100%';
-    document.getElementById('submit-btn').textContent = 'Run complete';
+    document.getElementById('submit-btn').textContent = currentMode === 'pilot' ? 'Pilot complete' : 'Run complete';
+
     const lnk = document.getElementById('s-link');
-    lnk.href = `/download/${runId}`;
+    lnk.href        = `/download/${runId}`;
+    lnk.textContent = currentMode === 'pilot' ? 'Download pilot CSV →' : 'Download tagged CSV →';
     lnk.style.display = 'inline-block';
-    setStep(4);
+
+    if (currentMode === 'pilot') {
+      document.getElementById('s-note').style.display = 'block';
+    }
+
+    setStep(currentMode === 'pilot' ? 3 : 4);
   }
 
   if (d.status === 'error') {
     hide('s-anim');
     const btn = document.getElementById('submit-btn');
-    btn.disabled = false;
-    btn.textContent = 'Run signal audit';
+    btn.disabled    = false;
+    btn.textContent = currentMode === 'pilot' ? 'Run pilot sample' : 'Run signal audit';
     const err = document.getElementById('s-err');
-    err.textContent = 'Error: ' + (d.error || 'Unknown. Check the log above.');
+    err.textContent  = 'Error: ' + (d.error || 'Unknown. Check the log above.');
     err.style.display = 'block';
   }
 }
@@ -697,16 +808,23 @@ function phaseToStep(phase) {
   if (!phase) return 1;
   const p = phase.toLowerCase();
   if (p.includes('scraping') || p.includes('youtube') || p.includes('tiktok') || p.includes('collecting')) return 2;
-  if (p.includes('tagging') || p.includes('generating') || p.includes('csv')) return 3;
-  if (p === 'done') return 4;
+  if (currentMode === 'full') {
+    if (p.includes('tagging') || p.includes('claude')) return 3;
+    if (p.includes('csv') || p === 'done') return 4;
+  } else {
+    // Pilot: no tagging step — CSV gen and done map to step 3
+    if (p.includes('csv') || p === 'done') return 3;
+  }
   return 1;
 }
 
 function setStep(n) {
-  for (let i = 1; i <= 4; i++) {
-    const el  = document.getElementById('step-' + i);
+  const maxStep = currentMode === 'pilot' ? 3 : 4;
+  for (let i = 1; i <= maxStep; i++) {
+    const el = document.getElementById('step-' + i);
+    if (!el || el.style.display === 'none') continue;
     const num = el.querySelector('.step-num');
-    el.classList.remove('active','done');
+    el.classList.remove('active', 'done');
     num.classList.remove('done');
     num.textContent = i;
     if (i < n)       { el.classList.add('done'); num.classList.add('done'); num.textContent = '✓'; }
